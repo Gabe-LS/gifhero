@@ -14,8 +14,10 @@ import { lzwEncodeLossy } from "./encoder/lossy-lzw.js";
 import type { GifFrame } from "./encoder/index.js";
 import {
   computeFrameDiff,
+  computeIndexDiff,
   optimizeDisposals,
   generatePalettes,
+  stabilizeStaticPixels,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
 
@@ -211,20 +213,34 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
         { quality: opts.imagequantQuality, speed: opts.imagequantSpeed, maxColors: 256 },
       );
 
+      let pixels: Uint8Array;
+      let palette: Uint8Array;
+
       if (result) {
-        indexed[i] = {
-          indexedPixels: result.indexed,
-          palette: result.palette,
-          delay: Math.round((frames[i].delay ?? 100) / 10),
-        };
+        pixels = result.indexed;
+        palette = result.palette;
       } else {
-        const palette = neuquant(frames[i].data, opts.quality);
-        indexed[i] = {
-          indexedPixels: floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine),
-          palette,
-          delay: Math.round((frames[i].delay ?? 100) / 10),
-        };
+        palette = neuquant(frames[i].data, opts.quality);
+        pixels = floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine);
       }
+
+      // Stabilize static pixels: overwrite unchanged pixels with the previous
+      // frame's palette index (mapped through the current palette). This
+      // eliminates dither flicker in static regions and enables frame diff.
+      if (i > 0) {
+        pixels = stabilizeStaticPixels(
+          pixels, indexed[i - 1].indexedPixels,
+          indexed[i - 1].palette, palette,
+          frames[i].data, frames[i - 1].data,
+          width * height, 2,
+        );
+      }
+
+      indexed[i] = {
+        indexedPixels: pixels,
+        palette,
+        delay: Math.round((frames[i].delay ?? 100) / 10),
+      };
     }
   } else {
     const palettes = generatePalettes(frames, opts.palette, opts.quality);
@@ -251,11 +267,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   }
 
   // ── Phase 2: Optimize (frame diff + disposal) ──
-  // Skip frame diff for imagequant — its dithering creates patterns that
-  // break when pixels are punched out for transparency. Imagequant frames
-  // must be written whole to preserve dithering coherence.
 
-  const useOptimize = opts.optimize.frameDiff && frames.length > 1 && opts.quantizer !== "imagequant";
+  const useOptimize = opts.optimize.frameDiff && frames.length > 1;
 
   if (!useOptimize) {
     const gifFrames: GifFrame[] = indexed.map((f) => ({
@@ -271,7 +284,9 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     });
   }
 
-  const disposals = opts.optimize.disposalOptimize
+  const useIndexDiff = opts.quantizer === "imagequant";
+
+  const disposals = opts.optimize.disposalOptimize && !useIndexDiff
     ? optimizeDisposals(frames, width, height, opts.optimize.frameDiffTolerance)
     : new Array<number>(frames.length).fill(0);
 
@@ -288,10 +303,10 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
         delay: f.delay, disposal: disposals[0],
       };
     } else {
-      const diff = computeFrameDiff(
-        f.indexedPixels, frames[i].data, prevRgba,
-        width, height, opts.optimize.frameDiffTolerance,
-      );
+      const diff = useIndexDiff
+        ? computeIndexDiff(f.indexedPixels, f.palette, indexed[i - 1].indexedPixels, indexed[i - 1].palette, width, height)
+        : computeFrameDiff(f.indexedPixels, frames[i].data, prevRgba, width, height, opts.optimize.frameDiffTolerance);
+
       gifFrames[i] = {
         indexedPixels: diff.indexedPixels, palette: f.palette,
         width: diff.width, height: diff.height, left: diff.left, top: diff.top,

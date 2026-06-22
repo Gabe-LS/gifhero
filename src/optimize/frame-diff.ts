@@ -182,6 +182,143 @@ export function computeFrameDiff(
 }
 
 /**
+ * Compute frame diff by comparing palette-decoded colors.
+ *
+ * Used after static pixel stabilization with per-frame palettes.
+ * Compares the actual displayed colors (palette lookups) rather than
+ * raw indices, since the same index means different colors in
+ * different palettes.
+ */
+export function computeIndexDiff(
+  currentIndexed: Uint8Array,
+  currentPalette: Uint8Array,
+  previousIndexed: Uint8Array,
+  previousPalette: Uint8Array,
+  canvasWidth: number,
+  canvasHeight: number,
+): FrameDiffResult {
+  const pixelCount = canvasWidth * canvasHeight;
+
+  let minX = canvasWidth;
+  let maxX = -1;
+  let minY = canvasHeight;
+  let maxY = -1;
+  const changed = new Uint8Array(pixelCount);
+
+  for (let y = 0; y < canvasHeight; y++) {
+    for (let x = 0; x < canvasWidth; x++) {
+      const i = y * canvasWidth + x;
+      const ci = currentIndexed[i] * 3;
+      const pi = previousIndexed[i] * 3;
+      const dr = currentPalette[ci] - previousPalette[pi];
+      const dg = currentPalette[ci + 1] - previousPalette[pi + 1];
+      const db = currentPalette[ci + 2] - previousPalette[pi + 2];
+      if (dr !== 0 || dg !== 0 || db !== 0) {
+        changed[i] = 1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0) {
+    return {
+      indexedPixels: new Uint8Array([0]),
+      transparentIndex: 0,
+      left: 0,
+      top: 0,
+      width: 1,
+      height: 1,
+    };
+  }
+
+  // Dilate changed mask by 2px to prevent dithered-edge ghost artifacts
+  const DILATE = 2;
+  const dilated = new Uint8Array(pixelCount);
+  for (let y = 0; y < canvasHeight; y++) {
+    for (let x = 0; x < canvasWidth; x++) {
+      if (changed[y * canvasWidth + x]) {
+        const y0 = Math.max(0, y - DILATE);
+        const y1 = Math.min(canvasHeight - 1, y + DILATE);
+        const x0 = Math.max(0, x - DILATE);
+        const x1 = Math.min(canvasWidth - 1, x + DILATE);
+        for (let dy = y0; dy <= y1; dy++) {
+          for (let dx = x0; dx <= x1; dx++) {
+            dilated[dy * canvasWidth + dx] = 1;
+          }
+        }
+      }
+    }
+  }
+  minX = canvasWidth; maxX = -1; minY = canvasHeight; maxY = -1;
+  for (let y = 0; y < canvasHeight; y++) {
+    for (let x = 0; x < canvasWidth; x++) {
+      const i = y * canvasWidth + x;
+      if (dilated[i]) {
+        changed[i] = 1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const cropW = maxX - minX + 1;
+  const cropH = maxY - minY + 1;
+
+  const usedByChanged = new Uint8Array(256);
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const i = y * canvasWidth + x;
+      if (changed[i]) {
+        usedByChanged[currentIndexed[i]] = 1;
+      }
+    }
+  }
+
+  let transparentIndex = -1;
+  for (let i = 255; i >= 0; i--) {
+    if (!usedByChanged[i]) {
+      transparentIndex = i;
+      break;
+    }
+  }
+
+  if (transparentIndex < 0) {
+    return {
+      indexedPixels: currentIndexed.slice(),
+      transparentIndex: -1,
+      left: 0,
+      top: 0,
+      width: canvasWidth,
+      height: canvasHeight,
+    };
+  }
+
+  const cropped = new Uint8Array(cropW * cropH);
+  for (let cy = 0; cy < cropH; cy++) {
+    for (let cx = 0; cx < cropW; cx++) {
+      const srcI = (minY + cy) * canvasWidth + (minX + cx);
+      cropped[cy * cropW + cx] = changed[srcI]
+        ? currentIndexed[srcI]
+        : transparentIndex;
+    }
+  }
+
+  return {
+    indexedPixels: cropped,
+    transparentIndex,
+    left: minX,
+    top: minY,
+    width: cropW,
+    height: cropH,
+  };
+}
+
+/**
  * Count how many source RGBA pixels differ between two frames.
  */
 export function countChangedPixelsRgba(
