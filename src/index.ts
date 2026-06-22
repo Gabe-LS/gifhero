@@ -51,10 +51,14 @@ export interface EncodeFrame {
 export interface OptimizeOptions {
   /** Enable frame differencing (delta encoding). Default true. */
   frameDiff?: boolean;
-  /** L1 RGB tolerance for "unchanged" pixels. 0 = lossless, 2–5 = visually lossless. Default 0. */
+  /** RGB tolerance for "unchanged" pixels. 0 = lossless, 2–5 = visually lossless. Default 0. */
   frameDiffTolerance?: number;
   /** Enable disposal method optimization. Default true. */
   disposalOptimize?: boolean;
+  /** Erode transparent mask by N pixels (keeps dithered borders intact). Default 0. */
+  frameDiffErode?: number;
+  /** Distance mode for pixel comparison. 'max' = per-channel max, 'sum' = channel sum. Default 'max'. */
+  frameDiffDistanceMode?: "max" | "sum";
 }
 
 /** Options for the high-level encode function. */
@@ -103,7 +107,7 @@ interface ResolvedOptions {
   temporalWeight: number;
   lossyLzw: number;
   loop: number;
-  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean };
+  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean; frameDiffErode?: number; frameDiffDistanceMode?: "max" | "sum" };
 }
 
 const PRESETS: Record<string, ResolvedOptions> = {
@@ -290,6 +294,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
           f.indexedPixels, f.palette,
           frames[i].data, frames[i - 1].data,
           width, height, opts.optimize.frameDiffTolerance,
+          opts.optimize.frameDiffErode ?? 0,
+          opts.optimize.frameDiffDistanceMode ?? "max",
         );
         gifFrames[i] = {
           indexedPixels: result.indexedPixels, palette: f.palette,
@@ -351,23 +357,50 @@ function punchTransparentHoles(
   w: number,
   h: number,
   tolerance: number,
+  erode: number = 0,
+  distanceMode: "max" | "sum" = "max",
 ): { indexedPixels: Uint8Array; transparentIndex: number; left: number; top: number; width: number; height: number } {
   const pixelCount = w * h;
+  const changed = new Uint8Array(pixelCount);
 
-  // Find which indices the changed pixels use
+  for (let i = 0; i < pixelCount; i++) {
+    const si = i << 2;
+    const dr = currentRgba[si] - prevRgba[si];
+    const dg = currentRgba[si + 1] - prevRgba[si + 1];
+    const db = currentRgba[si + 2] - prevRgba[si + 2];
+    const adr = dr < 0 ? -dr : dr;
+    const adg = dg < 0 ? -dg : dg;
+    const adb = db < 0 ? -db : db;
+    const dist = distanceMode === "sum" ? adr + adg + adb : Math.max(adr, adg, adb);
+    if (dist > tolerance) changed[i] = 1;
+  }
+
+  // Erode transparent mask: any transparent pixel adjacent to a changed
+  // pixel (8-connected) becomes changed. Keeps a dithered border intact.
+  for (let e = 0; e < erode; e++) {
+    const expand = new Uint8Array(pixelCount);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!changed[y * w + x]) continue;
+        const y0 = y > 0 ? y - 1 : 0;
+        const y1 = y < h - 1 ? y + 1 : h - 1;
+        const x0 = x > 0 ? x - 1 : 0;
+        const x1 = x < w - 1 ? x + 1 : w - 1;
+        for (let dy = y0; dy <= y1; dy++)
+          for (let dx = x0; dx <= x1; dx++)
+            expand[dy * w + dx] = 1;
+      }
+    }
+    for (let i = 0; i < pixelCount; i++) if (expand[i]) changed[i] = 1;
+  }
+
+  // Bounding box + usedByChanged
   const usedByChanged = new Uint8Array(256);
   let minX = w, maxX = -1, minY = h, maxY = -1;
-
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      const si = i << 2;
-      const dr = currentRgba[si] - prevRgba[si];
-      const dg = currentRgba[si + 1] - prevRgba[si + 1];
-      const db = currentRgba[si + 2] - prevRgba[si + 2];
-      if ((dr < -tolerance || dr > tolerance) ||
-          (dg < -tolerance || dg > tolerance) ||
-          (db < -tolerance || db > tolerance)) {
+      if (changed[i]) {
         usedByChanged[currentIndexed[i]] = 1;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
@@ -377,12 +410,10 @@ function punchTransparentHoles(
     }
   }
 
-  // No change — 1×1 transparent frame
   if (maxX < 0) {
     return { indexedPixels: new Uint8Array([0]), transparentIndex: 0, left: 0, top: 0, width: 1, height: 1 };
   }
 
-  // Pick transparent index within palette bounds
   const numColors = palette.length / 3;
   let palBits = 1;
   while ((1 << palBits) < numColors) palBits++;
@@ -396,23 +427,13 @@ function punchTransparentHoles(
     return { indexedPixels: currentIndexed.slice(), transparentIndex: -1, left: 0, top: 0, width: w, height: h };
   }
 
-  // Crop + punch holes
   const cw = maxX - minX + 1;
   const ch = maxY - minY + 1;
   const out = new Uint8Array(cw * ch);
   for (let cy = 0; cy < ch; cy++) {
     for (let cx = 0; cx < cw; cx++) {
-      const si = ((minY + cy) * w + (minX + cx)) << 2;
-      const dr = currentRgba[si] - prevRgba[si];
-      const dg = currentRgba[si + 1] - prevRgba[si + 1];
-      const db = currentRgba[si + 2] - prevRgba[si + 2];
-      if ((dr < -tolerance || dr > tolerance) ||
-          (dg < -tolerance || dg > tolerance) ||
-          (db < -tolerance || db > tolerance)) {
-        out[cy * cw + cx] = currentIndexed[(minY + cy) * w + (minX + cx)];
-      } else {
-        out[cy * cw + cx] = tIdx;
-      }
+      const srcI = (minY + cy) * w + (minX + cx);
+      out[cy * cw + cx] = changed[srcI] ? currentIndexed[srcI] : tIdx;
     }
   }
 
