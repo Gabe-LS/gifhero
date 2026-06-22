@@ -21,6 +21,8 @@ import {
   buildSubframe,
   compositeOntoCanvas,
   decodeFrameToCanvas,
+  trimPalette,
+  countUsedColors,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
 
@@ -44,6 +46,8 @@ export {
   buildSubframe,
   compositeOntoCanvas,
   decodeFrameToCanvas,
+  trimPalette,
+  countUsedColors,
 } from "./optimize/index.js";
 export type { FrameDiffResult, PaletteStrategy, SubframeResult } from "./optimize/index.js";
 
@@ -354,14 +358,50 @@ async function encodeSubframePipeline(
     neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
   }
 
+  // ── Auto-detect low-color content for global palette ──
+  // Quantize frame 0 and check used color count. If < 64,
+  // try a pooled global palette — saves per-frame palette overhead.
+  let globalPalette: Uint8Array | null = null;
+  if (opts.quantizer === "imagequant" && frames.length > 1) {
+    const probe = await quantizeFrame(frames[0].data, width, height, opts);
+    const usedColors = countUsedColors(probe.indexed);
+    if (usedColors < 64) {
+      // Pool every 5th frame to build a representative global palette
+      const step = Math.max(1, Math.floor(frames.length / 10));
+      const parts: Uint8ClampedArray[] = [];
+      for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
+      const poolSize = parts.reduce((s, p) => s + p.length, 0);
+      const pooled = new Uint8ClampedArray(poolSize);
+      let off = 0;
+      for (const p of parts) { pooled.set(p, off); off += p.length; }
+      const poolResult = await quantizeFrame(
+        pooled, width, (poolSize / 4) / width, opts,
+      );
+      const poolUsed = countUsedColors(poolResult.indexed);
+      if (poolUsed < 64) {
+        globalPalette = poolResult.palette;
+      }
+    }
+  }
+
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
 
     // ── Frame 0: full-frame quantization ──
     if (i === 0) {
-      const { indexed, palette } = await quantizeFrame(
-        frames[0].data, width, height, opts, neuquantPalettes?.[0],
-      );
+      let indexed: Uint8Array, palette: Uint8Array;
+      if (globalPalette) {
+        palette = globalPalette;
+        indexed = floydSteinberg(frames[0].data, width, height, palette, opts.ditherSerpentine);
+      } else {
+        ({ indexed, palette } = await quantizeFrame(
+          frames[0].data, width, height, opts, neuquantPalettes?.[0],
+        ));
+      }
+      const trimmed = trimPalette(palette, indexed);
+      indexed = trimmed.indexed;
+      palette = trimmed.palette;
+
       gifFrames[0] = {
         indexedPixels: indexed, palette, width, height,
         delay, disposal: 0,
@@ -394,10 +434,16 @@ async function encodeSubframePipeline(
     const ch = bbox.maxY - bbox.minY + 1;
     const cropped = cropRgba(curr, width, bbox.minX, bbox.minY, cw, ch);
 
-    // Quantize the crop
-    const { indexed, palette } = await quantizeFrame(
-      cropped, cw, ch, opts, neuquantPalettes?.[i],
-    );
+    // Quantize the crop (or dither with global palette)
+    let indexed: Uint8Array, palette: Uint8Array;
+    if (globalPalette) {
+      palette = globalPalette;
+      indexed = floydSteinberg(cropped, cw, ch, palette, opts.ditherSerpentine);
+    } else {
+      ({ indexed, palette } = await quantizeFrame(
+        cropped, cw, ch, opts, neuquantPalettes?.[i],
+      ));
+    }
 
     // Build optimized sub-frame (punch holes vs canvas + transeq + tight crop)
     const sub = buildSubframe(
@@ -407,19 +453,31 @@ async function encodeSubframePipeline(
       opts.optimize.transparencyEqualization,
     );
 
+    // Trim unused palette entries
+    let framePal = palette;
+    let framePx = sub.indexedPixels;
+    let frameTIdx = sub.transparentIndex;
+    if (sub.transparentIndex >= 0) {
+      const trimmed = trimPalette(palette, sub.indexedPixels, sub.transparentIndex);
+      framePal = trimmed.palette;
+      framePx = trimmed.indexed;
+      frameTIdx = trimmed.transparentIndex ?? -1;
+    }
+
     gifFrames[i] = {
-      indexedPixels: sub.indexedPixels,
-      palette,
+      indexedPixels: framePx,
+      palette: framePal,
       width: sub.width,
       height: sub.height,
       left: sub.left,
       top: sub.top,
-      transparentIndex: sub.transparentIndex >= 0 ? sub.transparentIndex : undefined,
+      transparentIndex: frameTIdx >= 0 ? frameTIdx : undefined,
       delay,
       disposal: 0,
     };
 
-    // Composite onto canvas so next frame compares against decoded state
+    // Composite onto canvas using the ORIGINAL (untrimmed) palette
+    // since canvas tracks actual decoded RGB values
     compositeOntoCanvas(canvasRgba, sub, palette, width);
   }
 

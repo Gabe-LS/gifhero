@@ -205,6 +205,42 @@ export function buildSubframe(
     punched[i] = changed[i] ? indexedPixels[i] : tIdx;
   }
 
+  // ── Stale transparency check ──
+  // For each transparent pixel, verify that the canvas color is close to
+  // what the current palette would render. If the nearest palette color
+  // for the source pixel diverges from the canvas by > 3, the canvas is
+  // showing stale data — flip the pixel to opaque.
+  const numPalEntries = numColors;
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = y * cw + x;
+      if (punched[i] !== tIdx) continue;
+      const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
+      const sr = currRgba[si], sg = currRgba[si + 1], sb = currRgba[si + 2];
+      const cr = canvasRgba[si], cg = canvasRgba[si + 1], cb = canvasRgba[si + 2];
+
+      // Find nearest palette color to the source pixel
+      let bestIdx = 0, bestDist = 0x7fffffff;
+      for (let p = 0; p < numPalEntries; p++) {
+        const po = p * 3;
+        const d = Math.abs(sr - palette[po]) + Math.abs(sg - palette[po + 1]) + Math.abs(sb - palette[po + 2]);
+        if (d < bestDist) { bestDist = d; bestIdx = p; }
+      }
+
+      // Compare what the palette would render vs what the canvas shows
+      const po = bestIdx * 3;
+      const palCanvasDiff = Math.max(
+        Math.abs(palette[po] - cr),
+        Math.abs(palette[po + 1] - cg),
+        Math.abs(palette[po + 2] - cb),
+      );
+      if (palCanvasDiff > 3) {
+        punched[i] = bestIdx;
+        usedByChanged[bestIdx] = 1;
+      }
+    }
+  }
+
   // ── Transparency run equalization (also vs canvas) ──
   if (enableTranseq) {
     for (let y = 0; y < ch; y++) {
@@ -329,4 +365,65 @@ export function decodeFrameToCanvas(
     canvas[ci + 2] = palette[pi + 2];
     canvas[ci + 3] = 255;
   }
+}
+
+/**
+ * Remove unused palette entries and remap indices.
+ *
+ * @param palette - Flat RGB palette
+ * @param indexed - Pixel indices
+ * @param transparentIndex - Transparent index to preserve (or undefined)
+ * @returns Trimmed palette, remapped indices, updated transparent index
+ */
+export function trimPalette(
+  palette: Uint8Array,
+  indexed: Uint8Array,
+  transparentIndex?: number,
+): { palette: Uint8Array; indexed: Uint8Array; transparentIndex?: number } {
+  const used = new Uint8Array(256);
+  for (let i = 0; i < indexed.length; i++) used[indexed[i]] = 1;
+  if (transparentIndex != null && transparentIndex >= 0) used[transparentIndex] = 1;
+
+  let count = 0;
+  for (let i = 0; i < 256; i++) if (used[i]) count++;
+
+  const origColors = (palette.length / 3) | 0;
+  if (count >= origColors) return { palette, indexed, transparentIndex };
+
+  const oldToNew = new Uint8Array(256);
+  const newPal = new Uint8Array(count * 3);
+  let slot = 0;
+  for (let i = 0; i < 256; i++) {
+    if (!used[i]) continue;
+    oldToNew[i] = slot;
+    const oi = i * 3;
+    if (oi + 2 < palette.length) {
+      newPal[slot * 3] = palette[oi];
+      newPal[slot * 3 + 1] = palette[oi + 1];
+      newPal[slot * 3 + 2] = palette[oi + 2];
+    }
+    slot++;
+  }
+
+  const remapped = new Uint8Array(indexed.length);
+  for (let i = 0; i < indexed.length; i++) remapped[i] = oldToNew[indexed[i]];
+
+  return {
+    palette: newPal,
+    indexed: remapped,
+    transparentIndex: (transparentIndex != null && transparentIndex >= 0)
+      ? oldToNew[transparentIndex]
+      : transparentIndex,
+  };
+}
+
+/**
+ * Count distinct palette indices used in indexed pixel data.
+ */
+export function countUsedColors(indexed: Uint8Array): number {
+  const used = new Uint8Array(256);
+  for (let i = 0; i < indexed.length; i++) used[indexed[i]] = 1;
+  let count = 0;
+  for (let i = 0; i < 256; i++) if (used[i]) count++;
+  return count;
 }
