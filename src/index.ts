@@ -6,12 +6,16 @@
 
 import { neuquant } from "./quantizers/index.js";
 import { floydSteinberg, mapNearest } from "./dither/index.js";
+import { ditherFrameTemporal } from "./dither/temporal.js";
+import type { TemporalDitherState } from "./dither/temporal.js";
 import { writeGif } from "./encoder/index.js";
 import type { GifFrame } from "./encoder/index.js";
 import {
   computeFrameDiff,
   optimizeDisposals,
+  generatePalettes,
 } from "./optimize/index.js";
+import type { PaletteStrategy } from "./optimize/index.js";
 
 export const VERSION = "0.0.1";
 
@@ -21,11 +25,14 @@ export { writeGif, lzwEncode } from "./encoder/index.js";
 export type { GifFrame, GifWriterOptions } from "./encoder/index.js";
 export { neuquant } from "./quantizers/index.js";
 export { floydSteinberg, mapNearest } from "./dither/index.js";
+export { ditherFrameTemporal } from "./dither/temporal.js";
+export type { TemporalDitherState } from "./dither/temporal.js";
 export {
   computeFrameDiff,
   optimizeDisposals,
+  generatePalettes,
 } from "./optimize/index.js";
-export type { FrameDiffResult } from "./optimize/index.js";
+export type { FrameDiffResult, PaletteStrategy } from "./optimize/index.js";
 
 // ── High-level encode API ────────────────────────────────────────
 
@@ -55,43 +62,118 @@ export interface EncodeOptions {
   height: number;
   /** One or more frames to encode. */
   frames: EncodeFrame[];
-  /** NeuQuant sampling quality 1–30 (1 = best, 30 = fastest). Default 10. */
+  /** Preset that sets defaults for all options. Individual options override preset values. */
+  preset?: "quality" | "balanced" | "speed";
+  /** NeuQuant sampling quality 1–30 (1 = best, 30 = fastest). */
   quality?: number;
-  /** Dithering method, or false to disable. Default 'floyd-steinberg'. */
+  /** Palette strategy for multi-frame animations. */
+  palette?: PaletteStrategy;
+  /** Dithering method, or false to disable. */
   dither?: "floyd-steinberg" | false;
-  /** Serpentine scanning for error diffusion. Default true. */
+  /** Serpentine scanning for error diffusion. */
   ditherSerpentine?: boolean;
+  /** Enable temporal dithering (cross-frame error diffusion). */
+  temporalDither?: boolean;
+  /** Temporal error weight 0.0–1.0 for temporal dithering. */
+  temporalWeight?: number;
   /** Loop count: 0 = forever, N > 0 = N times, < 0 = no loop. Default 0. */
   loop?: number;
   /** Frame optimization settings. Omit or set false to disable all optimization. */
   optimize?: OptimizeOptions | false;
 }
 
+// ── Presets ───────────────────────────────────────────────────────
+
+interface ResolvedOptions {
+  quality: number;
+  palette: PaletteStrategy;
+  dither: "floyd-steinberg" | false;
+  ditherSerpentine: boolean;
+  temporalDither: boolean;
+  temporalWeight: number;
+  loop: number;
+  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean };
+}
+
+const PRESETS: Record<string, ResolvedOptions> = {
+  quality: {
+    quality: 1,
+    palette: "crossframe",
+    dither: "floyd-steinberg",
+    ditherSerpentine: true,
+    temporalDither: true,
+    temporalWeight: 0.3,
+    loop: 0,
+    optimize: { frameDiff: true, frameDiffTolerance: 0, disposalOptimize: true },
+  },
+  balanced: {
+    quality: 10,
+    palette: "adaptive",
+    dither: "floyd-steinberg",
+    ditherSerpentine: true,
+    temporalDither: true,
+    temporalWeight: 0.2,
+    loop: 0,
+    optimize: { frameDiff: true, frameDiffTolerance: 2, disposalOptimize: true },
+  },
+  speed: {
+    quality: 20,
+    palette: "global",
+    dither: "floyd-steinberg",
+    ditherSerpentine: true,
+    temporalDither: false,
+    temporalWeight: 0,
+    loop: 0,
+    optimize: { frameDiff: true, frameDiffTolerance: 5, disposalOptimize: false },
+  },
+};
+
+function resolveOptions(options: EncodeOptions): ResolvedOptions {
+  const base = PRESETS[options.preset ?? "balanced"];
+
+  const userOpt =
+    options.optimize === false
+      ? { frameDiff: false, frameDiffTolerance: 0, disposalOptimize: false }
+      : options.optimize
+        ? { ...base.optimize, ...options.optimize }
+        : base.optimize;
+
+  return {
+    quality: options.quality ?? base.quality,
+    palette: options.palette ?? base.palette,
+    dither: options.dither !== undefined ? options.dither : base.dither,
+    ditherSerpentine: options.ditherSerpentine ?? base.ditherSerpentine,
+    temporalDither: options.temporalDither ?? base.temporalDither,
+    temporalWeight: options.temporalWeight ?? base.temporalWeight,
+    loop: options.loop ?? base.loop,
+    optimize: userOpt,
+  };
+}
+
+// ── Encode ────────────────────────────────────────────────────────
+
 /**
  * Encode RGBA frames into a GIF.
  *
- * Pipeline: NeuQuant quantize → Floyd-Steinberg dither → optimize → GIF89a write.
- * Each frame gets a per-frame local palette for maximum quality.
+ * Pipeline: palette strategy → dither (temporal or spatial) → frame optimize → GIF89a write.
  *
  * @param options - Frames, dimensions, and encoding settings
  * @returns Complete GIF file as a byte array
  */
 export function encode(options: EncodeOptions): Uint8Array {
-  const {
-    width,
-    height,
-    frames,
-    quality = 10,
-    dither = "floyd-steinberg",
-    ditherSerpentine = true,
-    loop = 0,
-  } = options;
+  const { width, height, frames } = options;
 
   if (frames.length === 0) {
     throw new Error("At least one frame is required");
   }
 
-  // ── 1. Quantize + dither every frame ──
+  const opts = resolveOptions(options);
+
+  // ── Phase 1: Generate palettes ──
+
+  const palettes = generatePalettes(frames, opts.palette, opts.quality);
+
+  // ── Phase 2: Dither frames ──
 
   const indexed: Array<{
     indexedPixels: Uint8Array;
@@ -99,34 +181,52 @@ export function encode(options: EncodeOptions): Uint8Array {
     delay: number;
   }> = new Array(frames.length);
 
-  for (let i = 0; i < frames.length; i++) {
-    const frame = frames[i];
-    const palette = neuquant(frame.data, quality);
-    const pixels =
-      dither === "floyd-steinberg"
-        ? floydSteinberg(frame.data, width, height, palette, ditherSerpentine)
-        : mapNearest(frame.data, palette);
+  if (opts.temporalDither && opts.dither === "floyd-steinberg" && frames.length > 1) {
+    let temporalState: TemporalDitherState | null = null;
 
-    indexed[i] = {
-      indexedPixels: pixels,
-      palette,
-      delay: Math.round((frame.delay ?? 100) / 10),
-    };
+    for (let i = 0; i < frames.length; i++) {
+      const prevRgba = i > 0 ? frames[i - 1].data : null;
+
+      const { indexed: pixels, nextState } = ditherFrameTemporal(
+        frames[i].data,
+        width,
+        height,
+        palettes[i],
+        temporalState,
+        prevRgba,
+        {
+          spatialWeight: 1.0 - opts.temporalWeight,
+          temporalWeight: opts.temporalWeight,
+          serpentine: opts.ditherSerpentine,
+        },
+      );
+
+      indexed[i] = {
+        indexedPixels: pixels,
+        palette: palettes[i],
+        delay: Math.round((frames[i].delay ?? 100) / 10),
+      };
+
+      temporalState = nextState;
+    }
+  } else {
+    for (let i = 0; i < frames.length; i++) {
+      const pixels =
+        opts.dither === "floyd-steinberg"
+          ? floydSteinberg(frames[i].data, width, height, palettes[i], opts.ditherSerpentine)
+          : mapNearest(frames[i].data, palettes[i]);
+
+      indexed[i] = {
+        indexedPixels: pixels,
+        palette: palettes[i],
+        delay: Math.round((frames[i].delay ?? 100) / 10),
+      };
+    }
   }
 
-  // ── 2. Optimize (frame diff + disposal) ──
+  // ── Phase 3: Optimize (frame diff + disposal) ──
 
-  const opt =
-    options.optimize === false
-      ? { frameDiff: false, frameDiffTolerance: 0, disposalOptimize: false }
-      : {
-          frameDiff: true,
-          frameDiffTolerance: 0,
-          disposalOptimize: true,
-          ...options.optimize,
-        };
-
-  const useOptimize = opt.frameDiff && frames.length > 1;
+  const useOptimize = opts.optimize.frameDiff && frames.length > 1;
 
   if (!useOptimize) {
     const gifFrames: GifFrame[] = indexed.map((f) => ({
@@ -136,17 +236,13 @@ export function encode(options: EncodeOptions): Uint8Array {
       height,
       delay: f.delay,
     }));
-    return writeGif(gifFrames, { width, height, loop });
+    return writeGif(gifFrames, { width, height, loop: opts.loop });
   }
 
-  // Choose disposal methods (using source RGBA for accurate comparison)
-  const disposals = opt.disposalOptimize
-    ? optimizeDisposals(frames, width, height, opt.frameDiffTolerance)
+  const disposals = opts.optimize.disposalOptimize
+    ? optimizeDisposals(frames, width, height, opts.optimize.frameDiffTolerance)
     : new Array<number>(frames.length).fill(0);
 
-  // Build delta frames. Track what the viewer "should see" as source RGBA
-  // so consecutive identical source pixels are correctly detected, even
-  // when per-frame NeuQuant palettes differ.
   const pixelCount = width * height;
   let prevRgba: Uint8ClampedArray | Uint8Array = new Uint8Array(pixelCount * 4);
   const gifFrames: GifFrame[] = new Array(frames.length);
@@ -170,7 +266,7 @@ export function encode(options: EncodeOptions): Uint8Array {
         prevRgba,
         width,
         height,
-        opt.frameDiffTolerance,
+        opts.optimize.frameDiffTolerance,
       );
 
       gifFrames[i] = {
@@ -187,13 +283,12 @@ export function encode(options: EncodeOptions): Uint8Array {
       };
     }
 
-    // Update canvas reference for next frame's comparison
     if (disposals[i] === 2) {
-      prevRgba = new Uint8Array(pixelCount * 4); // cleared to black
+      prevRgba = new Uint8Array(pixelCount * 4);
     } else {
-      prevRgba = frames[i].data; // source RGBA
+      prevRgba = frames[i].data;
     }
   }
 
-  return writeGif(gifFrames, { width, height, loop });
+  return writeGif(gifFrames, { width, height, loop: opts.loop });
 }

@@ -124,6 +124,10 @@
   .dssim-ok   { background: rgba(250, 204, 21, 0.15); color: var(--ok); }
   .dssim-bad  { background: rgba(248, 113, 113, 0.15); color: var(--bad); }
 
+  .metric-good { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+  .metric-ok   { background: rgba(250, 204, 21, 0.15); color: var(--ok); }
+  .metric-bad  { background: rgba(248, 113, 113, 0.15); color: var(--bad); }
+
   .scrubber {
     width: 100%;
     margin: 16px 0;
@@ -151,10 +155,18 @@
     font-weight: 500;
   }
 
+  .metrics-table th.num {
+    text-align: right;
+  }
+
   .metrics-table td {
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     font-variant-numeric: tabular-nums;
+  }
+
+  .metrics-table td.num {
+    text-align: right;
   }
 
   .drop-zone {
@@ -327,12 +339,41 @@ document.getElementById("jsonInput").addEventListener("change", (e) => {
   reader.readAsText(file);
 });
 
+// ─────────────────────────────────────────────
+// Color-coding helpers
+// ─────────────────────────────────────────────
+
+function vmafClass(val) {
+  if (val === null || val === undefined) return "";
+  if (val > 90) return "metric-good";
+  if (val >= 75) return "metric-ok";
+  return "metric-bad";
+}
+
+function cambiClass(val) {
+  if (val === null || val === undefined) return "";
+  if (val < 5) return "metric-good";
+  if (val <= 15) return "metric-ok";
+  return "metric-bad";
+}
+
+function tfsClass(val) {
+  if (val === null || val === undefined) return "";
+  if (val < 0.03) return "metric-good";
+  if (val <= 0.08) return "metric-ok";
+  return "metric-bad";
+}
+
 function dssimClass(val) {
   if (val === null || val === undefined) return "";
-  if (val < 0.005) return "dssim-good";
-  if (val < 0.015) return "dssim-ok";
-  return "dssim-bad";
+  if (val < 0.005) return "metric-good";
+  if (val < 0.015) return "metric-ok";
+  return "metric-bad";
 }
+
+// ─────────────────────────────────────────────
+// Formatting helpers
+// ─────────────────────────────────────────────
 
 function formatBytes(b) {
   if (b < 1024) return b + "B";
@@ -340,44 +381,81 @@ function formatBytes(b) {
   return (b / (1024 * 1024)).toFixed(1) + "MB";
 }
 
+function fmtOrNa(val, decimals) {
+  if (val === null || val === undefined) return "n/a";
+  return val.toFixed(decimals);
+}
+
+function badgeHtml(val, decimals, cssClassFn) {
+  const text = fmtOrNa(val, decimals);
+  const cls = cssClassFn ? cssClassFn(val) : "";
+  if (cls) {
+    return `<span class="dssim-badge ${cls}">${text}</span>`;
+  }
+  return text;
+}
+
+// ─────────────────────────────────────────────
+// Table rendering
+// ─────────────────────────────────────────────
+
 function renderMetrics(report) {
   const container = document.getElementById("metricsContainer");
-
   const fixtures = [...new Set(report.results.map(r => r.fixture))];
+
+  // Detect if VMAF data is available
+  const hasVmaf = report.results.some(r => r.vmafMean !== null && r.vmafMean !== undefined);
 
   let html = `<p class="subtitle">
     ${report.timestamp.split("T")[0]} · commit: ${report.gitCommit || "unknown"}
   </p>`;
 
   for (const fixture of fixtures) {
-    const rows = report.results
-      .filter(r => r.fixture === fixture)
-      .sort((a, b) => (a.dssimMean ?? 999) - (b.dssimMean ?? 999));
+    let rows = report.results.filter(r => r.fixture === fixture);
+
+    // Sort: VMAF descending if available, else DSSIM ascending
+    if (hasVmaf) {
+      rows.sort((a, b) => (b.vmafMean ?? -1) - (a.vmafMean ?? -1));
+    } else {
+      rows.sort((a, b) => (a.dssimMean ?? 999) - (b.dssimMean ?? 999));
+    }
 
     html += `<table class="metrics-table">
       <thead>
         <tr>
-          <th colspan="5">${fixture} (${rows[0]?.frameCount || "?"} frames)</th>
+          <th colspan="9">${fixture} (${rows[0]?.frameCount || "?"} frames)</th>
         </tr>
         <tr>
           <th>Encoder</th>
-          <th>DSSIM (mean)</th>
-          <th>DSSIM (p95)</th>
-          <th>File Size</th>
-          <th>Encode Time</th>
+          <th class="num">VMAF</th>
+          <th class="num">CAMBI</th>
+          <th class="num">CIEDE</th>
+          <th class="num">DSSIM</th>
+          <th class="num">TFS</th>
+          <th class="num">Size</th>
+          <th class="num">VMAF/MB</th>
+          <th class="num">Time</th>
         </tr>
       </thead>
       <tbody>`;
 
     for (const row of rows) {
-      const dssimStr = row.dssimMean !== null ? row.dssimMean.toFixed(5) : "n/a";
-      const p95Str = row.dssimP95 !== null ? row.dssimP95.toFixed(5) : "n/a";
+      const vmafPerMB = (row.vmafPerMB !== null && row.vmafPerMB !== undefined)
+        ? row.vmafPerMB
+        : (row.vmafMean !== null && row.vmafMean !== undefined && row.fileSize > 0)
+          ? row.vmafMean / (row.fileSize / (1024 * 1024))
+          : null;
+
       html += `<tr>
         <td>${row.encoder}</td>
-        <td><span class="dssim-badge ${dssimClass(row.dssimMean)}">${dssimStr}</span></td>
-        <td><span class="dssim-badge ${dssimClass(row.dssimP95)}">${p95Str}</span></td>
-        <td>${formatBytes(row.fileSize)}</td>
-        <td>${row.encodingTimeMs}ms</td>
+        <td class="num">${badgeHtml(row.vmafMean, 1, vmafClass)}</td>
+        <td class="num">${badgeHtml(row.cambiBanding, 2, cambiClass)}</td>
+        <td class="num">${fmtOrNa(row.ciede2000, 2)}</td>
+        <td class="num">${badgeHtml(row.dssimMean, 5, dssimClass)}</td>
+        <td class="num">${badgeHtml(row.flickerScore, 3, tfsClass)}</td>
+        <td class="num">${formatBytes(row.fileSize)}</td>
+        <td class="num">${fmtOrNa(vmafPerMB, 1)}</td>
+        <td class="num">${row.encodingTimeMs}ms</td>
       </tr>`;
     }
 

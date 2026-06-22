@@ -140,7 +140,7 @@ export function mapNearest(
  * Build a 32×32×32 RGB→palette-index cache for O(1) nearest-color
  * lookup. Each axis is quantized to 5 bits (32 levels).
  */
-function buildColorCache(
+export function buildColorCache(
   palette: Uint8Array,
   numColors: number,
 ): Uint8Array {

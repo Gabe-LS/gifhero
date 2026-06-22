@@ -204,15 +204,12 @@ describe("encode with optimize", () => {
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    const noOpt = encode({
-      width, height, frames: encFrames, quality: 10, optimize: false,
-    });
-    const lossless = encode({
-      width, height, frames: encFrames, quality: 10,
-      optimize: { frameDiff: true, frameDiffTolerance: 0 },
-    });
+    // Isolate the frame-diff variable by disabling temporal dithering and using local palettes
+    const shared = { width, height, frames: encFrames, quality: 10, temporalDither: false, palette: "local" as const };
 
-    // Lossless diff should still be smaller (identical pixels become transparent)
+    const noOpt = encode({ ...shared, optimize: false });
+    const lossless = encode({ ...shared, optimize: { frameDiff: true, frameDiffTolerance: 0 } });
+
     expect(lossless.length).toBeLessThan(noOpt.length);
   }, 120_000);
 
