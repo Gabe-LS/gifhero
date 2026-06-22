@@ -14,10 +14,8 @@ import { lzwEncodeLossy } from "./encoder/lossy-lzw.js";
 import type { GifFrame } from "./encoder/index.js";
 import {
   computeFrameDiff,
-  computeIndexDiff,
   optimizeDisposals,
   generatePalettes,
-  stabilizeStaticPixels,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
 
@@ -224,18 +222,6 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
         pixels = floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine);
       }
 
-      // Stabilize static pixels: overwrite unchanged pixels with the previous
-      // frame's palette index (mapped through the current palette). This
-      // eliminates dither flicker in static regions and enables frame diff.
-      if (i > 0) {
-        pixels = stabilizeStaticPixels(
-          pixels, indexed[i - 1].indexedPixels,
-          indexed[i - 1].palette, palette,
-          frames[i].data, frames[i - 1].data,
-          width * height, 2,
-        );
-      }
-
       indexed[i] = {
         indexedPixels: pixels,
         palette,
@@ -284,41 +270,70 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     });
   }
 
-  const useIndexDiff = opts.quantizer === "imagequant";
-
-  const disposals = opts.optimize.disposalOptimize && !useIndexDiff
-    ? optimizeDisposals(frames, width, height, opts.optimize.frameDiffTolerance)
-    : new Array<number>(frames.length).fill(0);
-
   const pixelCount = width * height;
-  let prevRgba: Uint8ClampedArray | Uint8Array = new Uint8Array(pixelCount * 4);
   const gifFrames: GifFrame[] = new Array(frames.length);
 
-  for (let i = 0; i < indexed.length; i++) {
-    const f = indexed[i];
+  if (opts.quantizer === "imagequant") {
+    // Imagequant path: punch transparent holes into dithered output.
+    // imagequant dithers the full frame for optimal quality. We then
+    // overwrite unchanged pixels with a transparent index and crop.
+    for (let i = 0; i < indexed.length; i++) {
+      const f = indexed[i];
 
-    if (i === 0) {
-      gifFrames[0] = {
-        indexedPixels: f.indexedPixels, palette: f.palette, width, height,
-        delay: f.delay, disposal: disposals[0],
-      };
-    } else {
-      const diff = useIndexDiff
-        ? computeIndexDiff(f.indexedPixels, f.palette, indexed[i - 1].indexedPixels, indexed[i - 1].palette, width, height)
-        : computeFrameDiff(f.indexedPixels, frames[i].data, prevRgba, width, height, opts.optimize.frameDiffTolerance);
-
-      gifFrames[i] = {
-        indexedPixels: diff.indexedPixels, palette: f.palette,
-        width: diff.width, height: diff.height, left: diff.left, top: diff.top,
-        transparentIndex: diff.transparentIndex >= 0 ? diff.transparentIndex : undefined,
-        delay: f.delay, disposal: disposals[i],
-      };
+      if (i === 0) {
+        gifFrames[0] = {
+          indexedPixels: f.indexedPixels, palette: f.palette, width, height,
+          delay: f.delay, disposal: 0,
+        };
+      } else {
+        const result = punchTransparentHoles(
+          f.indexedPixels, f.palette,
+          frames[i].data, frames[i - 1].data,
+          width, height, opts.optimize.frameDiffTolerance,
+        );
+        gifFrames[i] = {
+          indexedPixels: result.indexedPixels, palette: f.palette,
+          width: result.width, height: result.height,
+          left: result.left, top: result.top,
+          transparentIndex: result.transparentIndex,
+          delay: f.delay, disposal: 0,
+        };
+      }
     }
+  } else {
+    // NeuQuant path: RGBA-based frame diff (existing approach)
+    const disposals = opts.optimize.disposalOptimize
+      ? optimizeDisposals(frames, width, height, opts.optimize.frameDiffTolerance)
+      : new Array<number>(frames.length).fill(0);
 
-    if (disposals[i] === 2) {
-      prevRgba = new Uint8Array(pixelCount * 4);
-    } else {
-      prevRgba = frames[i].data;
+    let prevRgba: Uint8ClampedArray | Uint8Array = new Uint8Array(pixelCount * 4);
+
+    for (let i = 0; i < indexed.length; i++) {
+      const f = indexed[i];
+
+      if (i === 0) {
+        gifFrames[0] = {
+          indexedPixels: f.indexedPixels, palette: f.palette, width, height,
+          delay: f.delay, disposal: disposals[0],
+        };
+      } else {
+        const diff = computeFrameDiff(
+          f.indexedPixels, frames[i].data, prevRgba,
+          width, height, opts.optimize.frameDiffTolerance,
+        );
+        gifFrames[i] = {
+          indexedPixels: diff.indexedPixels, palette: f.palette,
+          width: diff.width, height: diff.height, left: diff.left, top: diff.top,
+          transparentIndex: diff.transparentIndex >= 0 ? diff.transparentIndex : undefined,
+          delay: f.delay, disposal: disposals[i],
+        };
+      }
+
+      if (disposals[i] === 2) {
+        prevRgba = new Uint8Array(pixelCount * 4);
+      } else {
+        prevRgba = frames[i].data;
+      }
     }
   }
 
@@ -326,6 +341,82 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     width, height, loop: opts.loop,
     lzwEncoder: buildLzwEncoder(opts.lossyLzw, indexed),
   });
+}
+
+function punchTransparentHoles(
+  currentIndexed: Uint8Array,
+  palette: Uint8Array,
+  currentRgba: Uint8ClampedArray,
+  prevRgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  tolerance: number,
+): { indexedPixels: Uint8Array; transparentIndex: number; left: number; top: number; width: number; height: number } {
+  const pixelCount = w * h;
+
+  // Find which indices the changed pixels use
+  const usedByChanged = new Uint8Array(256);
+  let minX = w, maxX = -1, minY = h, maxY = -1;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const si = i << 2;
+      const dr = currentRgba[si] - prevRgba[si];
+      const dg = currentRgba[si + 1] - prevRgba[si + 1];
+      const db = currentRgba[si + 2] - prevRgba[si + 2];
+      if ((dr < -tolerance || dr > tolerance) ||
+          (dg < -tolerance || dg > tolerance) ||
+          (db < -tolerance || db > tolerance)) {
+        usedByChanged[currentIndexed[i]] = 1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  // No change — 1×1 transparent frame
+  if (maxX < 0) {
+    return { indexedPixels: new Uint8Array([0]), transparentIndex: 0, left: 0, top: 0, width: 1, height: 1 };
+  }
+
+  // Pick transparent index within palette bounds
+  const numColors = palette.length / 3;
+  let palBits = 1;
+  while ((1 << palBits) < numColors) palBits++;
+  const maxIdx = (1 << palBits) - 1;
+
+  let tIdx = -1;
+  for (let i = maxIdx; i >= 0; i--) {
+    if (!usedByChanged[i]) { tIdx = i; break; }
+  }
+  if (tIdx < 0) {
+    return { indexedPixels: currentIndexed.slice(), transparentIndex: -1, left: 0, top: 0, width: w, height: h };
+  }
+
+  // Crop + punch holes
+  const cw = maxX - minX + 1;
+  const ch = maxY - minY + 1;
+  const out = new Uint8Array(cw * ch);
+  for (let cy = 0; cy < ch; cy++) {
+    for (let cx = 0; cx < cw; cx++) {
+      const si = ((minY + cy) * w + (minX + cx)) << 2;
+      const dr = currentRgba[si] - prevRgba[si];
+      const dg = currentRgba[si + 1] - prevRgba[si + 1];
+      const db = currentRgba[si + 2] - prevRgba[si + 2];
+      if ((dr < -tolerance || dr > tolerance) ||
+          (dg < -tolerance || dg > tolerance) ||
+          (db < -tolerance || db > tolerance)) {
+        out[cy * cw + cx] = currentIndexed[(minY + cy) * w + (minX + cx)];
+      } else {
+        out[cy * cw + cx] = tIdx;
+      }
+    }
+  }
+
+  return { indexedPixels: out, transparentIndex: tIdx, left: minX, top: minY, width: cw, height: ch };
 }
 
 function buildLzwEncoder(
