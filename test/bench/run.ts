@@ -8,10 +8,12 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, basename, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createCanvas, Image } from "canvas";
 import { isDssimAvailable, dssimFrames, extractGifFrames } from "../metrics/dssim";
+import { encode } from "../../src/index";
 
 // ─────────────────────────────────────────────
 // Configuration
@@ -66,7 +68,7 @@ function getGitCommit(): string | null {
 // Encoders
 // ─────────────────────────────────────────────
 
-type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void;
+type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void | Promise<void>;
 
 const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {
   gifski: {
@@ -122,14 +124,34 @@ const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> 
     },
   },
 
-  // Placeholder for gifhero — replace with actual library call when built
-  // gifhero: {
-  //   available: () => true,
-  //   encode: (framesDir, outputPath, frameCount) => {
-  //     // const { encode } = require('gifhero');
-  //     // ... load frames, encode, write
-  //   },
-  // },
+  gifhero: {
+    available: () => true,
+    encode: (framesDir, outputPath, frameCount) => {
+      const files = readdirSync(framesDir)
+        .filter((f: string) => f.endsWith(".png"))
+        .sort();
+
+      let width = 0;
+      let height = 0;
+      const frames: Array<{ data: Uint8ClampedArray; delay: number }> = [];
+
+      for (const file of files) {
+        const img = new Image();
+        img.src = readFileSync(join(framesDir, file));
+        if (width === 0) { width = img.width; height = img.height; }
+        const canvas = createCanvas(img.width, img.height);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        frames.push({
+          data: ctx.getImageData(0, 0, img.width, img.height).data,
+          delay: 50,
+        });
+      }
+
+      const gif = encode({ width, height, frames, quality: 10 });
+      writeFileSync(outputPath, gif);
+    },
+  },
 };
 
 // ─────────────────────────────────────────────
@@ -153,12 +175,12 @@ function countFrames(dir: string): number {
   return readdirSync(dir).filter((f) => f.endsWith(".png")).length;
 }
 
-function benchmarkEncoder(
+async function benchmarkEncoder(
   encoderName: string,
   encodeFn: EncoderFn,
   fixtureName: string,
   framesDir: string
-): EncoderResult | null {
+): Promise<EncoderResult | null> {
   const outputDir = join(TEMP_DIR, "gifs");
   mkdirSync(outputDir, { recursive: true });
   const outputPath = join(outputDir, `${fixtureName}-${encoderName}.gif`);
@@ -167,7 +189,7 @@ function benchmarkEncoder(
   // Encode and time it
   const start = performance.now();
   try {
-    encodeFn(framesDir, outputPath, frameCount);
+    await encodeFn(framesDir, outputPath, frameCount);
   } catch (err) {
     console.error(`    ✗ ${encoderName} failed: ${(err as Error).message}`);
     return null;
@@ -313,7 +335,7 @@ async function main() {
 
     for (const encoderName of available) {
       process.stdout.write(`    ${encoderName}...`);
-      const result = benchmarkEncoder(
+      const result = await benchmarkEncoder(
         encoderName,
         encoders[encoderName].encode,
         fixture,

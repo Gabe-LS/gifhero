@@ -9,7 +9,7 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, readdirSync } from "fs";
 
 export interface DssimResult {
   /** Mean DSSIM across all frames */
@@ -27,7 +27,7 @@ export interface DssimResult {
 /** Check if dssim CLI is available */
 export function isDssimAvailable(): boolean {
   try {
-    execSync("dssim --version", { stdio: "ignore" });
+    execSync("command -v dssim", { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -61,8 +61,6 @@ export function dssimPair(original: string, encoded: string): number {
  * @returns Aggregate DSSIM metrics
  */
 export function dssimFrames(sourceDir: string, encodedDir: string): DssimResult {
-  const { readdirSync } = require("fs");
-
   const sourceFiles = readdirSync(sourceDir)
     .filter((f: string) => f.endsWith(".png"))
     .sort();
@@ -98,7 +96,6 @@ export function dssimFrames(sourceDir: string, encodedDir: string): DssimResult 
  * Returns the path to the directory of extracted frames.
  */
 export function extractGifFrames(gifPath: string, outDir: string): string {
-  const { mkdirSync } = require("fs");
   mkdirSync(outDir, { recursive: true });
 
   execSync(
