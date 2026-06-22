@@ -24,6 +24,8 @@
     "test:quality": "vitest run test/quality-gates.test.ts",
     "bench:setup": "bash scripts/bench-setup.sh",
     "bench": "npx tsx test/bench/run.ts",
+    "bench:fast": "npx tsx test/bench/run.ts --fast",
+    "bench:full": "npx tsx test/bench/run.ts",
     "bench:compare": "open test/bench/compare.html",
     "fixtures": "npx tsx test/fixtures/generate.ts",
     "typecheck": "tsc --noEmit",

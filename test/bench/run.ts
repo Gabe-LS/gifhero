@@ -543,8 +543,8 @@ async function benchmarkEncoder(
       }
     }
 
-    // TFS
-    if (frameCount >= 2) {
+    // TFS (skip in fast mode — loading 60 RGBA frame pairs is expensive)
+    if (frameCount >= 2 && !FAST_MODE) {
       try {
         flickerScore = computeTFS(
           framesDir,
@@ -701,12 +701,28 @@ function oneLiner(result: EncoderResult, vmafAvailable: boolean): string {
 }
 
 // ─────────────────────────────────────────────
+// CLI flags
+// ─────────────────────────────────────────────
+
+const FAST_MODE = process.argv.includes("--fast");
+const PARALLEL_MODE = process.argv.includes("--parallel");
+
+const FAST_FIXTURES = new Set([
+  "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head",
+]);
+const FAST_ENCODERS = new Set([
+  "gifski", "gifhero-quality", "gifhero-balanced", "gifhero-speed",
+]);
+
+// ─────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────
 
 async function main() {
   console.log("");
   console.log("━━━ gifhero benchmark ━━━");
+  if (FAST_MODE) console.log("  ⚡ Fast mode: subset of fixtures and encoders, no TFS/DSSIM");
+  if (PARALLEL_MODE) console.log("  ⚠ Parallel mode: timing values are not comparable");
   console.log("");
 
   // Clean / create temp and results dirs
@@ -730,16 +746,20 @@ async function main() {
   console.log(`  gifski:   ${gifskiOk ? "available" : "not installed"}`);
   console.log(`  gifsicle: ${gifsicleOk ? "available" : "not installed"}`);
 
-  const fixtures = getFixtures();
+  let fixtures = getFixtures();
   if (fixtures.length === 0) {
     console.error("No fixtures found. Run: npm run bench:setup");
     process.exit(1);
   }
+  if (FAST_MODE) fixtures = fixtures.filter((f) => FAST_FIXTURES.has(f));
 
   // Detect available encoders
-  const available = Object.entries(encoders)
+  let available = Object.entries(encoders)
     .filter(([, e]) => e.available())
     .map(([name]) => name);
+  if (FAST_MODE) available = available.filter((n) => FAST_ENCODERS.has(n));
+
+  const runDssim = dssimOk && !FAST_MODE;
 
   console.log("");
   console.log(`  Fixtures: ${fixtures.join(", ")}`);
@@ -755,24 +775,38 @@ async function main() {
   // Run benchmarks
   const allResults: EncoderResult[] = [];
 
-  for (const fixture of fixtures) {
+  async function benchFixture(fixture: string) {
     const framesDir = join(FIXTURES_DIR, fixture);
-    console.log(`  Benchmarking: ${fixture} (${countFrames(framesDir)} frames)`);
+    if (!PARALLEL_MODE) console.log(`  Benchmarking: ${fixture} (${countFrames(framesDir)} frames)`);
+    const results: EncoderResult[] = [];
 
     for (const encoderName of available) {
-      process.stdout.write(`    ${encoderName}...`);
+      if (!PARALLEL_MODE) process.stdout.write(`    ${encoderName}...`);
       const result = await benchmarkEncoder(
         encoderName,
         encoders[encoderName].encode,
         fixture,
         framesDir,
         vmafOk,
-        dssimOk
+        runDssim
       );
       if (result) {
-        allResults.push(result);
-        console.log(oneLiner(result, vmafOk));
+        results.push(result);
+        if (!PARALLEL_MODE) console.log(oneLiner(result, vmafOk));
       }
+    }
+    return results;
+  }
+
+  if (PARALLEL_MODE) {
+    console.log(`  Running ${fixtures.length} fixtures in parallel...`);
+    const batches = await Promise.all(fixtures.map((f) => benchFixture(f)));
+    for (const batch of batches) allResults.push(...batch);
+    console.log(`  Done — ${allResults.length} results collected.`);
+  } else {
+    for (const fixture of fixtures) {
+      const results = await benchFixture(fixture);
+      allResults.push(...results);
     }
   }
 
