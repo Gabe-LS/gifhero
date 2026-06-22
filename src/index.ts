@@ -251,8 +251,11 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   }
 
   // ── Phase 2: Optimize (frame diff + disposal) ──
+  // Skip frame diff for imagequant — its dithering creates patterns that
+  // break when pixels are punched out for transparency. Imagequant frames
+  // must be written whole to preserve dithering coherence.
 
-  const useOptimize = opts.optimize.frameDiff && frames.length > 1;
+  const useOptimize = opts.optimize.frameDiff && frames.length > 1 && opts.quantizer !== "imagequant";
 
   if (!useOptimize) {
     const gifFrames: GifFrame[] = indexed.map((f) => ({
