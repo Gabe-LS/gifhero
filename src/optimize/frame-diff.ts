@@ -197,6 +197,11 @@ export function computeIndexDiff(
   canvasWidth: number,
   canvasHeight: number,
 ): FrameDiffResult {
+  // Transparent index must be within the GIF palette's padded size
+  const numColors = currentPalette.length / 3;
+  let palBits = 1;
+  while ((1 << palBits) < numColors) palBits++;
+  const maxPaletteIndex = (1 << palBits) - 1;
   const pixelCount = canvasWidth * canvasHeight;
 
   let minX = canvasWidth;
@@ -280,7 +285,7 @@ export function computeIndexDiff(
   }
 
   let transparentIndex = -1;
-  for (let i = 255; i >= 0; i--) {
+  for (let i = maxPaletteIndex; i >= 0; i--) {
     if (!usedByChanged[i]) {
       transparentIndex = i;
       break;
