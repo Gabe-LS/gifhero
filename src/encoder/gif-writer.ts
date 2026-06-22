@@ -155,7 +155,11 @@ function writeImageBlock(
     );
   }
 
-  const { padded, sizeField, minCodeSize } = padPalette(palette);
+  // Ensure palette is large enough to contain the transparent index
+  const minEntries = (frame.transparentIndex != null && frame.transparentIndex >= 0)
+    ? frame.transparentIndex + 1
+    : 0;
+  const { padded, sizeField, minCodeSize } = padPalette(palette, minEntries);
 
   // Image Descriptor
   buf.writeByte(0x2c); // image separator
@@ -204,11 +208,10 @@ interface PaletteInfo {
   minCodeSize: number;
 }
 
-function padPalette(palette: Uint8Array): PaletteInfo {
-  const numColors = palette.length / 3;
+function padPalette(palette: Uint8Array, minEntries: number = 0): PaletteInfo {
+  const numColors = Math.max(palette.length / 3, minEntries);
   let bits = 1;
   while (1 << bits < numColors) bits++;
-  // bits = ceil(log2(numColors)), minimum 1
 
   const paddedCount = 1 << bits;
   const paddedSize = paddedCount * 3;
