@@ -87,8 +87,18 @@ export function ditherFrameTemporal(
       const sg = rgba[pi + 1];
       const sb = rgba[pi + 2];
 
-      let best: number;
+      // Standard Floyd-Steinberg palette lookup
+      const ar = sr + errCurr[ei];
+      const ag = sg + errCurr[ei + 1];
+      const ab = sb + errCurr[ei + 2];
+      const cr = ar < 0 ? 0 : ar > 255 ? 255 : (ar + 0.5) | 0;
+      const cg = ag < 0 ? 0 : ag > 255 ? 255 : (ag + 0.5) | 0;
+      const cb = ab < 0 ? 0 : ab > 255 ? 255 : (ab + 0.5) | 0;
+      let best = cache[((cr >> 3) << 10) | ((cg >> 3) << 5) | (cb >> 3)];
 
+      // For unchanged pixels, prefer the previous frame's palette choice
+      // — but ONLY if it maps to the same or similar color in the current
+      // palette. This prevents large error propagation when palettes diverge.
       if (canLock) {
         const dr = sr - prevRgba![pi];
         const dg = sg - prevRgba![pi + 1];
@@ -99,27 +109,21 @@ export function ditherFrameTemporal(
         if (l1 <= lockThreshold) {
           const pIdx = prevIndexed![pixelIdx];
           const p3 = pIdx * 3;
-          const pr = prevPalette![p3];
-          const pg = prevPalette![p3 + 1];
-          const pb = prevPalette![p3 + 2];
-          best = cache[((pr >> 3) << 10) | ((pg >> 3) << 5) | (pb >> 3)];
-        } else {
-          const ar = sr + errCurr[ei];
-          const ag = sg + errCurr[ei + 1];
-          const ab = sb + errCurr[ei + 2];
-          const cr = ar < 0 ? 0 : ar > 255 ? 255 : (ar + 0.5) | 0;
-          const cg = ag < 0 ? 0 : ag > 255 ? 255 : (ag + 0.5) | 0;
-          const cb = ab < 0 ? 0 : ab > 255 ? 255 : (ab + 0.5) | 0;
-          best = cache[((cr >> 3) << 10) | ((cg >> 3) << 5) | (cb >> 3)];
+          const lockedBest =
+            cache[
+              ((prevPalette![p3] >> 3) << 10) |
+              ((prevPalette![p3 + 1] >> 3) << 5) |
+              (prevPalette![p3 + 2] >> 3)
+            ];
+          // Only lock if the locked color is close to the natural choice
+          const lb = lockedBest * 3;
+          const nb = best * 3;
+          const cd =
+            Math.abs(palette[lb] - palette[nb]) +
+            Math.abs(palette[lb + 1] - palette[nb + 1]) +
+            Math.abs(palette[lb + 2] - palette[nb + 2]);
+          if (cd <= 30) best = lockedBest;
         }
-      } else {
-        const ar = sr + errCurr[ei];
-        const ag = sg + errCurr[ei + 1];
-        const ab = sb + errCurr[ei + 2];
-        const cr = ar < 0 ? 0 : ar > 255 ? 255 : (ar + 0.5) | 0;
-        const cg = ag < 0 ? 0 : ag > 255 ? 255 : (ag + 0.5) | 0;
-        const cb = ab < 0 ? 0 : ab > 255 ? 255 : (ab + 0.5) | 0;
-        best = cache[((cr >> 3) << 10) | ((cg >> 3) << 5) | (cb >> 3)];
       }
 
       indexed[pixelIdx] = best;
