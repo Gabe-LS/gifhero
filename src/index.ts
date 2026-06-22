@@ -359,28 +359,45 @@ async function encodeSubframePipeline(
   }
 
   // ── Auto-detect low-color content for global palette ──
-  // Quantize frame 0 and check used color count. If < 64,
-  // try a pooled global palette — saves per-frame palette overhead.
+  // Always use imagequant for the probe — it adaptively sizes palettes,
+  // so low-color content produces < 64 entries. NeuQuant always makes
+  // 256 entries regardless of content complexity.
   let globalPalette: Uint8Array | null = null;
-  if (opts.quantizer === "imagequant" && frames.length > 1) {
-    const probe = await quantizeFrame(frames[0].data, width, height, opts);
-    const usedColors = countUsedColors(probe.indexed);
-    if (usedColors < 64) {
-      // Pool every 5th frame to build a representative global palette
-      const step = Math.max(1, Math.floor(frames.length / 10));
-      const parts: Uint8ClampedArray[] = [];
-      for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
-      const poolSize = parts.reduce((s, p) => s + p.length, 0);
-      const pooled = new Uint8ClampedArray(poolSize);
-      let off = 0;
-      for (const p of parts) { pooled.set(p, off); off += p.length; }
-      const poolResult = await quantizeFrame(
-        pooled, width, (poolSize / 4) / width, opts,
+  if (frames.length > 1) {
+    // Probe with fixed high-quality settings so the color count reflects
+    // content complexity, not encoding aggressiveness. The actual global
+    // palette is then generated at the preset's quality level.
+    try {
+      const probeResult = await quantizeImagequant(
+        frames[0].data, width, height,
+        { quality: 80, speed: 3, maxColors: 256 },
       );
-      const poolUsed = countUsedColors(poolResult.indexed);
-      if (poolUsed < 64) {
-        globalPalette = poolResult.palette;
+      if (probeResult && countUsedColors(probeResult.indexed) < 64) {
+        const step = Math.max(1, Math.floor(frames.length / 10));
+        const parts: Uint8ClampedArray[] = [];
+        for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
+        const poolSize = parts.reduce((s, p) => s + p.length, 0);
+        const pooled = new Uint8ClampedArray(poolSize);
+        let off = 0;
+        for (const p of parts) { pooled.set(p, off); off += p.length; }
+        // Generate the actual palette at preset quality
+        const iqQuality = opts.quantizer === "imagequant"
+          ? opts.quantizerQuality : 80;
+        const iqSpeed = opts.quantizer === "imagequant"
+          ? opts.quantizerSpeed : 3;
+        const poolResult = await quantizeImagequant(
+          pooled, width, (poolSize / 4) / width,
+          { quality: iqQuality, speed: iqSpeed, maxColors: 256 },
+        );
+        if (poolResult) {
+          const poolUsed = countUsedColors(poolResult.indexed);
+          if (poolUsed < 64) {
+            globalPalette = trimPalette(poolResult.palette, poolResult.indexed).palette;
+          }
+        }
       }
+    } catch {
+      // imagequant unavailable — skip auto-global detection
     }
   }
 

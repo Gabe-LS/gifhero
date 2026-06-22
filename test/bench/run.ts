@@ -708,7 +708,7 @@ const FAST_MODE = process.argv.includes("--fast");
 const PARALLEL_MODE = process.argv.includes("--parallel");
 
 const FAST_FIXTURES = new Set([
-  "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head",
+  "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
 const FAST_ENCODERS = new Set([
   "gifski", "gifhero-quality", "gifhero-balanced", "gifhero-speed",
