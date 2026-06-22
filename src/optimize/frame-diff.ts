@@ -79,6 +79,41 @@ export function computeFrameDiff(
     }
   }
 
+  // Dilate the changed mask by 2 pixels. Dithered pixels near object
+  // edges differ slightly between frames — without dilation they get
+  // marked "unchanged" and show through as ghost artifacts.
+  const DILATE = 2;
+  const dilated = new Uint8Array(pixelCount);
+  for (let y = 0; y < canvasHeight; y++) {
+    for (let x = 0; x < canvasWidth; x++) {
+      if (changed[y * canvasWidth + x]) {
+        const y0 = Math.max(0, y - DILATE);
+        const y1 = Math.min(canvasHeight - 1, y + DILATE);
+        const x0 = Math.max(0, x - DILATE);
+        const x1 = Math.min(canvasWidth - 1, x + DILATE);
+        for (let dy = y0; dy <= y1; dy++) {
+          for (let dx = x0; dx <= x1; dx++) {
+            dilated[dy * canvasWidth + dx] = 1;
+          }
+        }
+      }
+    }
+  }
+  // Update changed mask and recompute bounding box
+  minX = canvasWidth; maxX = -1; minY = canvasHeight; maxY = -1;
+  for (let y = 0; y < canvasHeight; y++) {
+    for (let x = 0; x < canvasWidth; x++) {
+      const i = y * canvasWidth + x;
+      if (dilated[i]) {
+        changed[i] = 1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
   // No pixels changed — emit a minimal 1×1 transparent frame
   if (maxX < 0) {
     return {

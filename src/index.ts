@@ -141,7 +141,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
     imagequantQuality: 60,
     imagequantSpeed: 10,
     palette: "crossframe",
-    dither: "floyd-steinberg",
+    dither: false,
     ditherSerpentine: true,
     temporalDither: false,
     temporalWeight: 0,

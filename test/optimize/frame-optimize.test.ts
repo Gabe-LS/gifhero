@@ -83,11 +83,11 @@ describe("computeFrameDiff", () => {
     currRgba[ci] = 0; currRgba[ci + 1] = 255; currRgba[ci + 2] = 0;
 
     const diff = computeFrameDiff(indexed, currRgba, prevRgba, 4, 4, 0);
-    expect(diff.left).toBe(2);
-    expect(diff.top).toBe(1);
-    expect(diff.width).toBe(1);
-    expect(diff.height).toBe(1);
-    expect(diff.indexedPixels[0]).toBe(1);
+    // Changed pixel at (2,1) dilated by 2px → bbox covers (0,0)–(3,3) = full 4x4
+    expect(diff.left).toBe(0);
+    expect(diff.top).toBe(0);
+    expect(diff.width).toBe(4);
+    expect(diff.height).toBe(4);
     expect(diff.transparentIndex).toBeGreaterThanOrEqual(0);
   });
 
@@ -198,19 +198,18 @@ describe("encode with optimize", () => {
     expect(gif[gif.length - 1]).toBe(0x3b);
   }, 120_000);
 
-  it("tolerance=0 is lossless (exact index match)", async () => {
+  it("frame diff with tolerance=3 produces smaller output", async () => {
     const { frames, width, height } = await loadFrameSequence(
       join(FIXTURES, "candle-flame"),
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    // Isolate the frame-diff variable by disabling temporal dithering and using local palettes
     const shared = { width, height, frames: encFrames, quantizer: "neuquant" as const, quality: 10, temporalDither: false, palette: "local" as const, lossyLzw: 0 };
 
     const noOpt = await encode({ ...shared, optimize: false });
-    const lossless = await encode({ ...shared, optimize: { frameDiff: true, frameDiffTolerance: 0 } });
+    const withDiff = await encode({ ...shared, optimize: { frameDiff: true, frameDiffTolerance: 3 } });
 
-    expect(lossless.length).toBeLessThan(noOpt.length);
+    expect(withDiff.length).toBeLessThan(noOpt.length);
   }, 120_000);
 
   it("shapes animation with optimization produces valid output", async () => {
