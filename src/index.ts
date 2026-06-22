@@ -266,7 +266,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     }));
     return writeGif(gifFrames, {
       width, height, loop: opts.loop,
-      lzwEncoder: buildLzwEncoder(opts.lossyLzw, indexed),
+      lzwEncoder: buildLzwEncoder(opts.lossyLzw, gifFrames),
     });
   }
 
@@ -339,7 +339,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
   return writeGif(gifFrames, {
     width, height, loop: opts.loop,
-    lzwEncoder: buildLzwEncoder(opts.lossyLzw, indexed),
+    lzwEncoder: buildLzwEncoder(opts.lossyLzw, gifFrames),
   });
 }
 
@@ -421,13 +421,13 @@ function punchTransparentHoles(
 
 function buildLzwEncoder(
   lossyLzw: number,
-  indexed: Array<{ palette: Uint8Array }>,
+  gifFrames: GifFrame[],
 ): ((pixels: Uint8Array, minCodeSize: number) => Uint8Array) | undefined {
   if (lossyLzw <= 0) return undefined;
   let frameIdx = 0;
   return (pixels: Uint8Array, minCodeSize: number) => {
-    const palette = indexed[Math.min(frameIdx, indexed.length - 1)].palette;
+    const f = gifFrames[Math.min(frameIdx, gifFrames.length - 1)];
     frameIdx++;
-    return lzwEncodeLossy(pixels, palette, minCodeSize, lossyLzw);
+    return lzwEncodeLossy(pixels, f.palette, minCodeSize, lossyLzw, f.transparentIndex ?? -1);
   };
 }

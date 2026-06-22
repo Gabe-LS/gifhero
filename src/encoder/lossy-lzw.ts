@@ -61,6 +61,7 @@ export function lzwEncodeLossy(
   palette: Uint8Array,
   minCodeSize: number,
   lossiness: number,
+  transparentIndex: number = -1,
 ): Uint8Array {
   const isLossy = lossiness > 0;
   const numColors = (palette.length / 3) | 0;
@@ -110,12 +111,13 @@ export function lzwEncodeLossy(
 
     if (dict.has(exactKey)) {
       prefix = dict.get(exactKey)!;
-    } else if (isLossy) {
+    } else if (isLossy && suffix !== transparentIndex) {
+      // Never substitute a transparent pixel — its index must be preserved
       let bestKey = -1;
       let bestDist = lossiness + 1;
       const base = suffix * 256;
       for (let alt = 0; alt < numColors; alt++) {
-        if (alt === suffix) continue;
+        if (alt === suffix || alt === transparentIndex) continue;
         const d = distTable![base + alt];
         if (d <= lossiness && d < bestDist) {
           const altKey = (prefix << 8) | alt;
