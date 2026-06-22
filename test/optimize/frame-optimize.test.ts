@@ -138,11 +138,11 @@ describe("encode with optimize", () => {
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    const noOpt = encode({
-      width, height, frames: encFrames, quality: 10, optimize: false,
+    const noOpt = await encode({
+      width, height, frames: encFrames, quantizer: "neuquant", quality: 10, optimize: false,
     });
-    const withOpt = encode({
-      width, height, frames: encFrames, quality: 10,
+    const withOpt = await encode({
+      width, height, frames: encFrames, quantizer: "neuquant", quality: 10,
       optimize: { frameDiff: true, frameDiffTolerance: 3, disposalOptimize: true },
     });
 
@@ -163,11 +163,11 @@ describe("encode with optimize", () => {
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    const noOpt = encode({
-      width, height, frames: encFrames, quality: 10, optimize: false,
+    const noOpt = await encode({
+      width, height, frames: encFrames, quantizer: "neuquant", quality: 10, optimize: false,
     });
-    const withOpt = encode({
-      width, height, frames: encFrames, quality: 10,
+    const withOpt = await encode({
+      width, height, frames: encFrames, quantizer: "neuquant", quality: 10,
       optimize: { frameDiff: true, frameDiffTolerance: 3, disposalOptimize: true },
     });
 
@@ -186,7 +186,7 @@ describe("encode with optimize", () => {
     const { frames, width, height } = await loadFrameSequence(
       join(FIXTURES, "candle-flame"),
     );
-    const gif = encode({
+    const gif = await encode({
       width, height,
       frames: frames.map((f) => ({ data: f.data, delay: 50 })),
       quality: 10,
@@ -205,10 +205,10 @@ describe("encode with optimize", () => {
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
     // Isolate the frame-diff variable by disabling temporal dithering and using local palettes
-    const shared = { width, height, frames: encFrames, quality: 10, temporalDither: false, palette: "local" as const };
+    const shared = { width, height, frames: encFrames, quantizer: "neuquant" as const, quality: 10, temporalDither: false, palette: "local" as const, lossyLzw: 0 };
 
-    const noOpt = encode({ ...shared, optimize: false });
-    const lossless = encode({ ...shared, optimize: { frameDiff: true, frameDiffTolerance: 0 } });
+    const noOpt = await encode({ ...shared, optimize: false });
+    const lossless = await encode({ ...shared, optimize: { frameDiff: true, frameDiffTolerance: 0 } });
 
     expect(lossless.length).toBeLessThan(noOpt.length);
   }, 120_000);
@@ -218,7 +218,7 @@ describe("encode with optimize", () => {
       join(FIXTURES, "shapes"),
     );
 
-    const gif = encode({
+    const gif = await encode({
       width, height,
       frames: frames.map((f) => ({ data: f.data, delay: 50 })),
       quality: 10,
@@ -235,12 +235,9 @@ describe("encode with optimize", () => {
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    // Default encode (no explicit optimize option)
-    const defaultGif = encode({ width, height, frames: encFrames, quality: 10 });
-
-    // Explicit optimize=false
-    const noOptGif = encode({
-      width, height, frames: encFrames, quality: 10, optimize: false,
+    const defaultGif = await encode({ width, height, frames: encFrames, quantizer: "neuquant", quality: 10, lossyLzw: 0 });
+    const noOptGif = await encode({
+      width, height, frames: encFrames, quantizer: "neuquant", quality: 10, lossyLzw: 0, optimize: false,
     });
 
     // Default should be optimized (smaller)

@@ -44,6 +44,8 @@ export interface GifWriterOptions {
   loop?: number;
   /** Background color index into the global palette. Defaults to 0. */
   backgroundIndex?: number;
+  /** Custom LZW encoder. When provided, used instead of the default lzwEncode for image data. */
+  lzwEncoder?: (pixels: Uint8Array, minCodeSize: number) => Uint8Array;
 }
 
 /**
@@ -174,7 +176,8 @@ function writeImageBlock(
   }
 
   // Image Data — LZW compressed, sub-blocked
-  const compressed = lzwEncode(frame.indexedPixels, minCodeSize);
+  const encoder = opts.lzwEncoder ?? lzwEncode;
+  const compressed = encoder(frame.indexedPixels, minCodeSize);
   buf.writeByte(minCodeSize); // min code size byte
   writeSubBlocks(buf, compressed);
   buf.writeByte(0); // block terminator

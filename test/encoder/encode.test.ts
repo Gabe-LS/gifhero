@@ -151,7 +151,7 @@ describe("encode", () => {
       join(FIXTURES, "gradient", "0001.png"),
     );
 
-    const gif = encode({
+    const gif = await encode({
       width,
       height,
       frames: [{ data, delay: 0 }],
@@ -174,7 +174,7 @@ describe("encode", () => {
       join(FIXTURES, "color-wheel"),
     );
 
-    const gif = encode({
+    const gif = await encode({
       width,
       height,
       frames: frames.map((f) => ({ data: f.data, delay: 50 })),
@@ -195,7 +195,7 @@ describe("encode", () => {
       join(FIXTURES, "shapes"),
     );
 
-    const gif = encode({
+    const gif = await encode({
       width,
       height,
       frames: frames.map((f) => ({ data: f.data, delay: 50 })),
@@ -215,7 +215,7 @@ describe("encode", () => {
       join(FIXTURES, "gradient", "0001.png"),
     );
 
-    const gif = encode({
+    const gif = await encode({
       width,
       height,
       frames: [{ data }],
@@ -227,9 +227,9 @@ describe("encode", () => {
     writeFileSync(join(OUTPUT, "gradient-nodither.gif"), gif);
   });
 
-  it("throws on empty frames array", () => {
-    expect(() =>
+  it("throws on empty frames array", async () => {
+    await expect(
       encode({ width: 10, height: 10, frames: [] }),
-    ).toThrow(/frame/i);
+    ).rejects.toThrow(/frame/i);
   });
 });

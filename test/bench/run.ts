@@ -170,25 +170,25 @@ const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> 
 
   "gifhero-quality": {
     available: () => true,
-    encode: (framesDir, outputPath) => {
+    encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, encode({ width, height, frames, preset: "quality" }));
+      writeFileSync(outputPath, await encode({ width, height, frames, preset: "quality" }));
     },
   },
 
   "gifhero-balanced": {
     available: () => true,
-    encode: (framesDir, outputPath) => {
+    encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, encode({ width, height, frames, preset: "balanced" }));
+      writeFileSync(outputPath, await encode({ width, height, frames, preset: "balanced" }));
     },
   },
 
   "gifhero-speed": {
     available: () => true,
-    encode: (framesDir, outputPath) => {
+    encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, encode({ width, height, frames, preset: "speed" }));
+      writeFileSync(outputPath, await encode({ width, height, frames, preset: "speed" }));
     },
   },
 };

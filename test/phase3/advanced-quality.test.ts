@@ -116,15 +116,17 @@ describe("temporal dithering", () => {
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
-    const noTemporal = encode({
+    const noTemporal = await encode({
       width, height, frames: encFrames,
+      quantizer: "neuquant",
       palette: "local",
       quality: 10,
       optimize: false,
     });
 
-    const withTemporal = encode({
+    const withTemporal = await encode({
       width, height, frames: encFrames,
+      quantizer: "neuquant",
       palette: "crossframe",
       quality: 10,
       optimize: false,
@@ -166,7 +168,7 @@ describe("presets", () => {
     const frames = [{ data, delay: 0 }];
 
     for (const preset of ["quality", "balanced", "speed"] as const) {
-      const gif = encode({ width, height, frames, preset, loop: -1 });
+      const gif = await encode({ width, height, frames, preset, loop: -1 });
       expect(gif).toBeInstanceOf(Uint8Array);
       const sig = String.fromCharCode(...Array.from(gif.slice(0, 6)));
       expect(sig).toBe("GIF89a");
@@ -179,8 +181,8 @@ describe("presets", () => {
     );
     const encFrames = frames.slice(0, 10).map((f) => ({ data: f.data, delay: 50 }));
 
-    const qualityGif = encode({ width, height, frames: encFrames, preset: "quality" });
-    const speedGif = encode({ width, height, frames: encFrames, preset: "speed" });
+    const qualityGif = await encode({ width, height, frames: encFrames, preset: "quality" });
+    const speedGif = await encode({ width, height, frames: encFrames, preset: "speed" });
 
     // Quality preset should produce larger but better-looking output
     expect(qualityGif.length).toBeGreaterThan(0);
