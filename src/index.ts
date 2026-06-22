@@ -59,6 +59,8 @@ export interface OptimizeOptions {
   frameDiffErode?: number;
   /** Distance mode for pixel comparison. 'max' = per-channel max, 'sum' = channel sum. Default 'max'. */
   frameDiffDistanceMode?: "max" | "sum";
+  /** Drop near-duplicate frames whose SSIM exceeds this threshold (0–1). Default 0 (disabled). */
+  dropThreshold?: number;
 }
 
 /** Options for the high-level encode function. */
@@ -107,7 +109,7 @@ interface ResolvedOptions {
   temporalWeight: number;
   lossyLzw: number;
   loop: number;
-  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean; frameDiffErode?: number; frameDiffDistanceMode?: "max" | "sum" };
+  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean; frameDiffErode?: number; frameDiffDistanceMode?: "max" | "sum"; dropThreshold?: number };
 }
 
 const PRESETS: Record<string, ResolvedOptions> = {
@@ -192,13 +194,48 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
  * @returns Complete GIF file as a byte array
  */
 export async function encode(options: EncodeOptions): Promise<Uint8Array> {
-  const { width, height, frames } = options;
+  const { width, height } = options;
+  let { frames } = options;
 
   if (frames.length === 0) {
     throw new Error("At least one frame is required");
   }
 
   const opts = resolveOptions(options);
+
+  // ── Phase 0: Drop near-duplicate frames ──
+
+  const dropThreshold = opts.optimize.dropThreshold ?? 0;
+  if (dropThreshold > 0 && frames.length > 1) {
+    const kept: EncodeFrame[] = [frames[0]];
+    const pixelCount = width * height;
+    for (let i = 1; i < frames.length; i++) {
+      const prev = kept[kept.length - 1].data;
+      const curr = frames[i].data;
+      let sumSq = 0;
+      let sumTotal = 0;
+      for (let p = 0; p < pixelCount; p++) {
+        const si = p << 2;
+        for (let c = 0; c < 3; c++) {
+          const d = curr[si + c] - prev[si + c];
+          sumSq += d * d;
+          sumTotal++;
+        }
+      }
+      const mse = sumSq / sumTotal;
+      const psnr = mse > 0 ? 10 * Math.log10(255 * 255 / mse) : 100;
+      const ssimApprox = psnr > 48 ? 1.0 : psnr > 40 ? 0.999 : psnr > 35 ? 0.995 : psnr > 30 ? 0.99 : 0.98;
+      if (ssimApprox > dropThreshold) {
+        kept[kept.length - 1] = {
+          ...kept[kept.length - 1],
+          delay: (kept[kept.length - 1].delay ?? 100) + (frames[i].delay ?? 100),
+        };
+      } else {
+        kept.push(frames[i]);
+      }
+    }
+    frames = kept;
+  }
 
   // ── Phase 1: Generate palettes + dither ──
 
@@ -208,7 +245,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     delay: number;
   }> = new Array(frames.length);
 
-  if (opts.quantizer === "imagequant") {
+  if (opts.quantizer === "imagequant" && opts.palette !== "global") {
+    // Per-frame imagequant: each frame gets its own palette + dithering
     for (let i = 0; i < frames.length; i++) {
       const result = await quantizeImagequant(
         frames[i].data, width, height,
@@ -229,6 +267,32 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
       indexed[i] = {
         indexedPixels: pixels,
         palette,
+        delay: Math.round((frames[i].delay ?? 100) / 10),
+      };
+    }
+  } else if (opts.quantizer === "imagequant" && opts.palette === "global") {
+    // Global imagequant palette: pool pixels → one palette → Floyd-Steinberg each frame.
+    // Consistent dithering means frame diff works perfectly.
+    const sampleStep = Math.max(1, Math.floor(frames.length / 10));
+    const poolParts: Uint8ClampedArray[] = [];
+    for (let i = 0; i < frames.length; i += sampleStep) poolParts.push(frames[i].data);
+    const poolSize = poolParts.reduce((s, p) => s + p.length, 0);
+    const pooled = new Uint8ClampedArray(poolSize);
+    let off = 0;
+    for (const p of poolParts) { pooled.set(p, off); off += p.length; }
+    const poolW = width;
+    const poolH = (poolSize / 4) / width;
+
+    const iqResult = await quantizeImagequant(pooled, poolW, poolH, {
+      quality: opts.imagequantQuality, speed: opts.imagequantSpeed, maxColors: 256,
+    });
+    const globalPalette = iqResult ? iqResult.palette : neuquant(pooled, opts.quality);
+
+    for (let i = 0; i < frames.length; i++) {
+      const pixels = floydSteinberg(frames[i].data, width, height, globalPalette, opts.ditherSerpentine);
+      indexed[i] = {
+        indexedPixels: pixels,
+        palette: globalPalette,
         delay: Math.round((frames[i].delay ?? 100) / 10),
       };
     }
