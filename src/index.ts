@@ -373,9 +373,13 @@ async function encodeSubframePipeline(
     // ── Frames 1+: sub-frame encoding ──
 
     const curr = frames[i].data;
+    const prev = frames[i - 1].data;
 
-    // Compare source against decoded canvas (not previous source)
-    const bbox = findChangedBbox(curr, canvasRgba, width, height, opts.optimize.cropTolerance);
+    // Include pixels where source changed OR canvas is stale
+    const bbox = findChangedBbox(
+      curr, prev, canvasRgba, width, height,
+      opts.optimize.cropTolerance, opts.optimize.holeTolerance,
+    );
     if (!bbox) {
       gifFrames[i] = {
         indexedPixels: new Uint8Array([0]),

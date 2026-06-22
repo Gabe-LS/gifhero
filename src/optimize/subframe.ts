@@ -52,33 +52,47 @@ export function cropRgba(
 }
 
 /**
- * Find the bounding box of pixels that differ between a source
- * frame and the decoded canvas.
+ * Find the bounding box of pixels that need re-encoding.
+ *
+ * A pixel is "changed" if EITHER the source differs from the
+ * previous source by more than cropTolerance, OR the source
+ * differs from the decoded canvas by more than holeTolerance.
+ * The first condition catches scene changes; the second catches
+ * stale canvas pixels (dithering artifacts from earlier frames).
  *
  * @param curr - Current source frame RGBA
+ * @param prev - Previous source frame RGBA
  * @param canvas - Decoded canvas RGBA (what the decoder shows)
  * @param w - Frame width
  * @param h - Frame height
- * @param tolerance - Max per-channel difference to consider "unchanged"
+ * @param cropTolerance - Source-vs-source noise threshold
+ * @param holeTolerance - Source-vs-canvas staleness threshold
  * @returns Bounding box, or null if no pixels changed
  */
 export function findChangedBbox(
   curr: Uint8ClampedArray,
+  prev: Uint8ClampedArray,
   canvas: Uint8ClampedArray,
   w: number,
   h: number,
-  tolerance: number,
+  cropTolerance: number,
+  holeTolerance: number,
 ): { minX: number; maxX: number; minY: number; maxY: number } | null {
   let minX = w, maxX = -1, minY = h, maxY = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const si = (y * w + x) * 4;
-      const d = Math.max(
+      const srcDiff = Math.max(
+        Math.abs(curr[si] - prev[si]),
+        Math.abs(curr[si + 1] - prev[si + 1]),
+        Math.abs(curr[si + 2] - prev[si + 2]),
+      );
+      const canvasDiff = Math.max(
         Math.abs(curr[si] - canvas[si]),
         Math.abs(curr[si + 1] - canvas[si + 1]),
         Math.abs(curr[si + 2] - canvas[si + 2]),
       );
-      if (d > tolerance) {
+      if (srcDiff > cropTolerance || canvasDiff > holeTolerance) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
