@@ -107,8 +107,8 @@ const PRESETS: Record<string, ResolvedOptions> = {
     optimize: { frameDiff: true, frameDiffTolerance: 0, disposalOptimize: true },
   },
   balanced: {
-    quality: 10,
-    palette: "adaptive",
+    quality: 3,
+    palette: "crossframe",
     dither: "floyd-steinberg",
     ditherSerpentine: true,
     temporalDither: true,
@@ -117,8 +117,8 @@ const PRESETS: Record<string, ResolvedOptions> = {
     optimize: { frameDiff: true, frameDiffTolerance: 2, disposalOptimize: true },
   },
   speed: {
-    quality: 20,
-    palette: "global",
+    quality: 10,
+    palette: "crossframe",
     dither: "floyd-steinberg",
     ditherSerpentine: true,
     temporalDither: false,
@@ -195,7 +195,7 @@ export function encode(options: EncodeOptions): Uint8Array {
         temporalState,
         prevRgba,
         {
-          spatialWeight: 1.0 - opts.temporalWeight,
+          spatialWeight: 1.0,
           temporalWeight: opts.temporalWeight,
           serpentine: opts.ditherSerpentine,
         },

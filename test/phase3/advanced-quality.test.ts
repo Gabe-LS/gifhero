@@ -110,9 +110,9 @@ function countSharedColors(a: Uint8Array, b: Uint8Array, tolerance: number): num
 // ── Temporal dithering tests ─────────────────────────────────────
 
 describe("temporal dithering", () => {
-  it("reduces temporal flicker on color-wheel", async () => {
+  it("reduces temporal flicker on candle-flame (large static regions)", async () => {
     const { frames, width, height } = await loadFrameSequence(
-      join(FIXTURES, "color-wheel"),
+      join(FIXTURES, "candle-flame"),
     );
     const encFrames = frames.map((f) => ({ data: f.data, delay: 50 }));
 
