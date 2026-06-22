@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gifhero — visual benchmark comparison</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181b;
+    --border: #2a2a2e;
+    --text: #e4e4e7;
+    --text-dim: #71717a;
+    --accent: #a78bfa;
+    --good: #4ade80;
+    --ok: #facc15;
+    --bad: #f87171;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    color: var(--text-dim);
+    margin-bottom: 24px;
+    font-size: 12px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+
+  .controls label {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  select, input[type="file"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .panel-header h2 {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .panel-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .panel-body {
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    background: #111;
+  }
+
+  .panel-body img {
+    max-width: 100%;
+    image-rendering: auto;
+  }
+
+  .dssim-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .dssim-good { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+  .dssim-ok   { background: rgba(250, 204, 21, 0.15); color: var(--ok); }
+  .dssim-bad  { background: rgba(248, 113, 113, 0.15); color: var(--bad); }
+
+  .scrubber {
+    width: 100%;
+    margin: 16px 0;
+  }
+
+  .scrubber input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+
+  .metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 24px;
+  }
+
+  .metrics-table th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  .metrics-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 40px;
+    text-align: center;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .drop-zone:hover, .drop-zone.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .instructions {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .instructions h3 {
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .instructions code {
+    background: rgba(167, 139, 250, 0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+
+  canvas { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<h1>gifhero benchmark</h1>
+<p class="subtitle">visual quality comparison — drop GIFs or load benchmark results</p>
+
+<div class="instructions">
+  <h3>How to use</h3>
+  <p>
+    1. Run <code>npm run bench:setup</code> then <code>npm run bench</code> to generate reference GIFs.<br>
+    2. Drop your gifhero output GIF on the left panel, and a reference GIF (gifski, ffmpeg) on the right.<br>
+    3. Use the frame scrubber to step through and compare frame by frame.<br>
+    4. Or load <code>test/bench/results/latest.json</code> to see the full metrics table.
+  </p>
+</div>
+
+<div class="controls">
+  <div>
+    <label>Results JSON</label><br>
+    <input type="file" id="jsonInput" accept=".json">
+  </div>
+</div>
+
+<!-- Metrics table (populated from JSON) -->
+<div id="metricsContainer"></div>
+
+<!-- Side by side comparison -->
+<div class="comparison-grid">
+  <div class="panel">
+    <div class="panel-header">
+      <h2>gifhero</h2>
+      <span class="panel-meta" id="leftMeta">drop a GIF</span>
+    </div>
+    <div class="panel-body" id="leftPanel">
+      <div class="drop-zone" id="leftDrop">
+        Drop gifhero .gif here
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h2>Reference</h2>
+      <span class="panel-meta" id="rightMeta">drop a GIF</span>
+    </div>
+    <div class="panel-body" id="rightPanel">
+      <div class="drop-zone" id="rightDrop">
+        Drop reference .gif here (gifski, ffmpeg)
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Per-frame DSSIM chart placeholder -->
+<div class="chart-container" id="chartContainer" style="display:none">
+  <h2 style="font-size:13px; margin-bottom:12px;">Per-frame DSSIM</h2>
+  <canvas id="dssimChart" width="800" height="200"></canvas>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// GIF drop handling
+// ─────────────────────────────────────────────
+function setupDrop(dropEl, panelEl, metaEl, side) {
+  function handleFile(file) {
+    if (!file.type.includes("gif") && !file.name.endsWith(".gif")) return;
+    const url = URL.createObjectURL(file);
+    const img = document.createElement("img");
+    img.src = url;
+    panelEl.innerHTML = "";
+    panelEl.appendChild(img);
+    const sizeKB = (file.size / 1024).toFixed(0);
+    metaEl.textContent = `${file.name} (${sizeKB}KB)`;
+  }
+
+  dropEl.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropEl.classList.add("active");
+  });
+  dropEl.addEventListener("dragleave", () => dropEl.classList.remove("active"));
+  dropEl.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropEl.classList.remove("active");
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  dropEl.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".gif";
+    input.onchange = () => { if (input.files.length) handleFile(input.files[0]); };
+    input.click();
+  });
+}
+
+setupDrop(
+  document.getElementById("leftDrop"),
+  document.getElementById("leftPanel"),
+  document.getElementById("leftMeta"),
+  "left"
+);
+setupDrop(
+  document.getElementById("rightDrop"),
+  document.getElementById("rightPanel"),
+  document.getElementById("rightMeta"),
+  "right"
+);
+
+// ─────────────────────────────────────────────
+// JSON results loading
+// ─────────────────────────────────────────────
+document.getElementById("jsonInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const report = JSON.parse(reader.result);
+      renderMetrics(report);
+    } catch (err) {
+      alert("Invalid JSON: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+function dssimClass(val) {
+  if (val === null || val === undefined) return "";
+  if (val < 0.005) return "dssim-good";
+  if (val < 0.015) return "dssim-ok";
+  return "dssim-bad";
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + "B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + "KB";
+  return (b / (1024 * 1024)).toFixed(1) + "MB";
+}
+
+function renderMetrics(report) {
+  const container = document.getElementById("metricsContainer");
+
+  const fixtures = [...new Set(report.results.map(r => r.fixture))];
+
+  let html = `<p class="subtitle">
+    ${report.timestamp.split("T")[0]} · commit: ${report.gitCommit || "unknown"}
+  </p>`;
+
+  for (const fixture of fixtures) {
+    const rows = report.results
+      .filter(r => r.fixture === fixture)
+      .sort((a, b) => (a.dssimMean ?? 999) - (b.dssimMean ?? 999));
+
+    html += `<table class="metrics-table">
+      <thead>
+        <tr>
+          <th colspan="5">${fixture} (${rows[0]?.frameCount || "?"} frames)</th>
+        </tr>
+        <tr>
+          <th>Encoder</th>
+          <th>DSSIM (mean)</th>
+          <th>DSSIM (p95)</th>
+          <th>File Size</th>
+          <th>Encode Time</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+    for (const row of rows) {
+      const dssimStr = row.dssimMean !== null ? row.dssimMean.toFixed(5) : "n/a";
+      const p95Str = row.dssimP95 !== null ? row.dssimP95.toFixed(5) : "n/a";
+      html += `<tr>
+        <td>${row.encoder}</td>
+        <td><span class="dssim-badge ${dssimClass(row.dssimMean)}">${dssimStr}</span></td>
+        <td><span class="dssim-badge ${dssimClass(row.dssimP95)}">${p95Str}</span></td>
+        <td>${formatBytes(row.fileSize)}</td>
+        <td>${row.encodingTimeMs}ms</td>
+      </tr>`;
+    }
+
+    html += `</tbody></table>`;
+  }
+
+  container.innerHTML = html;
+}
+</script>
+</body>
+</html>

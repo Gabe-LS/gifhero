@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Test artifacts
+test/fixtures/generated/
+test/fixtures/videos/
+test/bench/references/
+test/bench/results/
+test/bench/.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

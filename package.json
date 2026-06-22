@@ -1,0 +1,56 @@
+{
+  "name": "gifhero",
+  "version": "0.0.1",
+  "description": "The highest-quality GIF encoder for the browser. Temporal dithering, cross-frame palettes, lossy LZW, and more.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:quality": "vitest run test/quality-gates.test.ts",
+    "bench:setup": "bash scripts/bench-setup.sh",
+    "bench": "npx tsx test/bench/run.ts",
+    "bench:compare": "open test/bench/compare.html",
+    "fixtures": "npx tsx test/fixtures/generate.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ test/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "gif",
+    "encoder",
+    "animation",
+    "dithering",
+    "quantization",
+    "temporal-dithering",
+    "floyd-steinberg",
+    "neuquant",
+    "lzw",
+    "browser",
+    "wasm",
+    "chrome-extension"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "canvas": "^3.1.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}
