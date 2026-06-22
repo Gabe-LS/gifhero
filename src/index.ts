@@ -16,6 +16,11 @@ import {
   computeFrameDiff,
   optimizeDisposals,
   generatePalettes,
+  cropRgba,
+  findChangedBbox,
+  buildSubframe,
+  compositeOntoCanvas,
+  decodeFrameToCanvas,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
 
@@ -34,8 +39,13 @@ export {
   computeFrameDiff,
   optimizeDisposals,
   generatePalettes,
+  cropRgba,
+  findChangedBbox,
+  buildSubframe,
+  compositeOntoCanvas,
+  decodeFrameToCanvas,
 } from "./optimize/index.js";
-export type { FrameDiffResult, PaletteStrategy } from "./optimize/index.js";
+export type { FrameDiffResult, PaletteStrategy, SubframeResult } from "./optimize/index.js";
 
 // ── High-level encode API ────────────────────────────────────────
 
@@ -49,18 +59,27 @@ export interface EncodeFrame {
 
 /** Frame optimization settings. */
 export interface OptimizeOptions {
-  /** Enable frame differencing (delta encoding). Default true. */
-  frameDiff?: boolean;
-  /** RGB tolerance for "unchanged" pixels. 0 = lossless, 2–5 = visually lossless. Default 0. */
-  frameDiffTolerance?: number;
-  /** Enable disposal method optimization. Default true. */
+  /** Enable sub-frame encoding (crop → quantize → punch holes). Default true. */
+  subframe?: boolean;
+  /** Bounding-box noise filter: max per-channel diff to include in crop. Default 5. */
+  cropTolerance?: number;
+  /** Hole-punch tolerance: max per-channel diff to mark transparent. 0 = exact match. Default 0. */
+  holeTolerance?: number;
+  /** Flip isolated opaque pixels to transparent when surrounded by transparency. Default true. */
+  transparencyEqualization?: boolean;
+  /** Enable disposal method optimization (neuquant legacy path). Default true. */
   disposalOptimize?: boolean;
-  /** Erode transparent mask by N pixels (keeps dithered borders intact). Default 0. */
-  frameDiffErode?: number;
-  /** Distance mode for pixel comparison. 'max' = per-channel max, 'sum' = channel sum. Default 'max'. */
-  frameDiffDistanceMode?: "max" | "sum";
   /** Drop near-duplicate frames whose SSIM exceeds this threshold (0–1). Default 0 (disabled). */
   dropThreshold?: number;
+  // Legacy options (used when subframe=false)
+  /** @deprecated Use subframe instead. Enable frame differencing. */
+  frameDiff?: boolean;
+  /** @deprecated Use cropTolerance instead. RGB tolerance for "unchanged" pixels. */
+  frameDiffTolerance?: number;
+  /** @deprecated Erode transparent mask by N pixels. */
+  frameDiffErode?: number;
+  /** @deprecated Distance mode for pixel comparison. */
+  frameDiffDistanceMode?: "max" | "sum";
 }
 
 /** Options for the high-level encode function. */
@@ -97,11 +116,25 @@ export interface EncodeOptions {
 
 // ── Presets ───────────────────────────────────────────────────────
 
+interface ResolvedOptimize {
+  subframe: boolean;
+  cropTolerance: number;
+  holeTolerance: number;
+  transparencyEqualization: boolean;
+  disposalOptimize: boolean;
+  dropThreshold: number;
+  // Legacy fields
+  frameDiff: boolean;
+  frameDiffTolerance: number;
+  frameDiffErode: number;
+  frameDiffDistanceMode: "max" | "sum";
+}
+
 interface ResolvedOptions {
   quantizer: "imagequant" | "neuquant";
-  quality: number;
-  imagequantQuality: number;
-  imagequantSpeed: number;
+  quantizerQuality: number;
+  quantizerSpeed: number;
+  maxColors: number;
   palette: PaletteStrategy;
   dither: "floyd-steinberg" | false;
   ditherSerpentine: boolean;
@@ -109,29 +142,65 @@ interface ResolvedOptions {
   temporalWeight: number;
   lossyLzw: number;
   loop: number;
-  optimize: { frameDiff: boolean; frameDiffTolerance: number; disposalOptimize: boolean; frameDiffErode?: number; frameDiffDistanceMode?: "max" | "sum"; dropThreshold?: number };
+  optimize: ResolvedOptimize;
 }
 
 const PRESETS: Record<string, ResolvedOptions> = {
   quality: {
     quantizer: "imagequant",
-    quality: 1,
-    imagequantQuality: 90,
-    imagequantSpeed: 4,
+    quantizerQuality: 90,
+    quantizerSpeed: 1,
+    maxColors: 256,
     palette: "crossframe",
     dither: "floyd-steinberg",
     ditherSerpentine: true,
     temporalDither: false,
     temporalWeight: 0,
-    lossyLzw: 0,
+    lossyLzw: 4,
     loop: 0,
-    optimize: { frameDiff: true, frameDiffTolerance: 0, disposalOptimize: true },
+    optimize: {
+      subframe: true,
+      cropTolerance: 5,
+      holeTolerance: 0,
+      transparencyEqualization: true,
+      disposalOptimize: true,
+      dropThreshold: 0,
+      frameDiff: true,
+      frameDiffTolerance: 0,
+      frameDiffErode: 0,
+      frameDiffDistanceMode: "max",
+    },
   },
   balanced: {
     quantizer: "imagequant",
-    quality: 3,
-    imagequantQuality: 80,
-    imagequantSpeed: 6,
+    quantizerQuality: 80,
+    quantizerSpeed: 3,
+    maxColors: 256,
+    palette: "crossframe",
+    dither: "floyd-steinberg",
+    ditherSerpentine: true,
+    temporalDither: false,
+    temporalWeight: 0,
+    lossyLzw: 4,
+    loop: 0,
+    optimize: {
+      subframe: true,
+      cropTolerance: 5,
+      holeTolerance: 0,
+      transparencyEqualization: true,
+      disposalOptimize: true,
+      dropThreshold: 0,
+      frameDiff: true,
+      frameDiffTolerance: 2,
+      frameDiffErode: 0,
+      frameDiffDistanceMode: "max",
+    },
+  },
+  speed: {
+    quantizer: "neuquant",
+    quantizerQuality: 20,
+    quantizerSpeed: 10,
+    maxColors: 256,
     palette: "crossframe",
     dither: "floyd-steinberg",
     ditherSerpentine: true,
@@ -139,39 +208,57 @@ const PRESETS: Record<string, ResolvedOptions> = {
     temporalWeight: 0,
     lossyLzw: 0,
     loop: 0,
-    optimize: { frameDiff: true, frameDiffTolerance: 2, disposalOptimize: true },
-  },
-  speed: {
-    quantizer: "neuquant",
-    quality: 10,
-    imagequantQuality: 60,
-    imagequantSpeed: 10,
-    palette: "crossframe",
-    dither: false,
-    ditherSerpentine: true,
-    temporalDither: false,
-    temporalWeight: 0,
-    lossyLzw: 0,
-    loop: 0,
-    optimize: { frameDiff: true, frameDiffTolerance: 5, disposalOptimize: false },
+    optimize: {
+      subframe: true,
+      cropTolerance: 5,
+      holeTolerance: 0,
+      transparencyEqualization: true,
+      disposalOptimize: false,
+      dropThreshold: 0,
+      frameDiff: true,
+      frameDiffTolerance: 5,
+      frameDiffErode: 0,
+      frameDiffDistanceMode: "max",
+    },
   },
 };
 
 function resolveOptions(options: EncodeOptions): ResolvedOptions {
   const base = PRESETS[options.preset ?? "balanced"];
 
-  const userOpt =
-    options.optimize === false
-      ? { frameDiff: false, frameDiffTolerance: 0, disposalOptimize: false }
-      : options.optimize
-        ? { ...base.optimize, ...options.optimize }
-        : base.optimize;
+  let userOpt: ResolvedOptimize;
+  if (options.optimize === false) {
+    userOpt = {
+      subframe: false, cropTolerance: 0, holeTolerance: 0,
+      transparencyEqualization: false, disposalOptimize: false, dropThreshold: 0,
+      frameDiff: false, frameDiffTolerance: 0, frameDiffErode: 0, frameDiffDistanceMode: "max",
+    };
+  } else if (options.optimize) {
+    const o = options.optimize;
+    userOpt = {
+      subframe: o.subframe ?? false,
+      cropTolerance: o.cropTolerance ?? base.optimize.cropTolerance,
+      holeTolerance: o.holeTolerance ?? base.optimize.holeTolerance,
+      transparencyEqualization: o.transparencyEqualization ?? base.optimize.transparencyEqualization,
+      disposalOptimize: o.disposalOptimize ?? base.optimize.disposalOptimize,
+      dropThreshold: o.dropThreshold ?? base.optimize.dropThreshold,
+      frameDiff: o.frameDiff ?? base.optimize.frameDiff,
+      frameDiffTolerance: o.frameDiffTolerance ?? base.optimize.frameDiffTolerance,
+      frameDiffErode: o.frameDiffErode ?? base.optimize.frameDiffErode,
+      frameDiffDistanceMode: o.frameDiffDistanceMode ?? base.optimize.frameDiffDistanceMode,
+    };
+  } else {
+    userOpt = base.optimize;
+  }
 
+  const quantizer = options.quantizer ?? base.quantizer;
   return {
-    quantizer: options.quantizer ?? base.quantizer,
-    quality: options.quality ?? base.quality,
-    imagequantQuality: base.imagequantQuality,
-    imagequantSpeed: base.imagequantSpeed,
+    quantizer,
+    quantizerQuality: quantizer === "neuquant"
+      ? (options.quality ?? base.quantizerQuality)
+      : base.quantizerQuality,
+    quantizerSpeed: base.quantizerSpeed,
+    maxColors: base.maxColors,
     palette: options.palette ?? base.palette,
     dither: options.dither !== undefined ? options.dither : base.dither,
     ditherSerpentine: options.ditherSerpentine ?? base.ditherSerpentine,
@@ -188,8 +275,6 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
 /**
  * Encode RGBA frames into a GIF.
  *
- * Pipeline: quantize (imagequant or NeuQuant) → dither → frame optimize → LZW → GIF89a.
- *
  * @param options - Frames, dimensions, and encoding settings
  * @returns Complete GIF file as a byte array
  */
@@ -205,7 +290,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
   // ── Phase 0: Drop near-duplicate frames ──
 
-  const dropThreshold = opts.optimize.dropThreshold ?? 0;
+  const dropThreshold = opts.optimize.dropThreshold;
   if (dropThreshold > 0 && frames.length > 1) {
     const kept: EncodeFrame[] = [frames[0]];
     const pixelCount = width * height;
@@ -237,6 +322,147 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     frames = kept;
   }
 
+  // ── Sub-frame pipeline ──
+
+  if (opts.optimize.subframe && frames.length > 1) {
+    const gifFrames = await encodeSubframePipeline(frames, width, height, opts);
+    return writeGif(gifFrames, {
+      width, height, loop: opts.loop,
+      lzwEncoder: buildLzwEncoder(opts.lossyLzw, gifFrames),
+    });
+  }
+
+  // ── Legacy pipeline: quantize all → frame diff ──
+
+  return encodeLegacyPipeline(frames, width, height, opts);
+}
+
+// ── Sub-frame pipeline ──────────────────────────────────────────
+
+async function encodeSubframePipeline(
+  frames: EncodeFrame[],
+  width: number,
+  height: number,
+  opts: ResolvedOptions,
+): Promise<GifFrame[]> {
+  const gifFrames: GifFrame[] = new Array(frames.length);
+  const canvasRgba = new Uint8ClampedArray(width * height * 4);
+
+  // For neuquant, generate palettes upfront from full frames
+  let neuquantPalettes: Uint8Array[] | null = null;
+  if (opts.quantizer === "neuquant") {
+    neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
+  }
+
+  for (let i = 0; i < frames.length; i++) {
+    const delay = Math.round((frames[i].delay ?? 100) / 10);
+
+    // ── Frame 0: full-frame quantization ──
+    if (i === 0) {
+      const { indexed, palette } = await quantizeFrame(
+        frames[0].data, width, height, opts, neuquantPalettes?.[0],
+      );
+      gifFrames[0] = {
+        indexedPixels: indexed, palette, width, height,
+        delay, disposal: 0,
+      };
+      decodeFrameToCanvas(canvasRgba, indexed, palette, width, height);
+      continue;
+    }
+
+    // ── Frames 1+: sub-frame encoding ──
+
+    const curr = frames[i].data;
+
+    // Compare source against decoded canvas (not previous source)
+    const bbox = findChangedBbox(curr, canvasRgba, width, height, opts.optimize.cropTolerance);
+    if (!bbox) {
+      gifFrames[i] = {
+        indexedPixels: new Uint8Array([0]),
+        palette: gifFrames[i - 1].palette,
+        width: 1, height: 1, left: 0, top: 0,
+        delay, disposal: 0, transparentIndex: 0,
+      };
+      continue;
+    }
+
+    const cw = bbox.maxX - bbox.minX + 1;
+    const ch = bbox.maxY - bbox.minY + 1;
+    const cropped = cropRgba(curr, width, bbox.minX, bbox.minY, cw, ch);
+
+    // Quantize the crop
+    const { indexed, palette } = await quantizeFrame(
+      cropped, cw, ch, opts, neuquantPalettes?.[i],
+    );
+
+    // Build optimized sub-frame (punch holes vs canvas + transeq + tight crop)
+    const sub = buildSubframe(
+      indexed, palette, curr, canvasRgba,
+      bbox.minX, bbox.minY, cw, ch, width,
+      opts.optimize.holeTolerance,
+      opts.optimize.transparencyEqualization,
+    );
+
+    gifFrames[i] = {
+      indexedPixels: sub.indexedPixels,
+      palette,
+      width: sub.width,
+      height: sub.height,
+      left: sub.left,
+      top: sub.top,
+      transparentIndex: sub.transparentIndex >= 0 ? sub.transparentIndex : undefined,
+      delay,
+      disposal: 0,
+    };
+
+    // Composite onto canvas so next frame compares against decoded state
+    compositeOntoCanvas(canvasRgba, sub, palette, width);
+  }
+
+  return gifFrames;
+}
+
+async function quantizeFrame(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  opts: ResolvedOptions,
+  neuquantPalette?: Uint8Array,
+): Promise<{ indexed: Uint8Array; palette: Uint8Array }> {
+  if (opts.quantizer === "imagequant") {
+    try {
+      const result = await quantizeImagequant(rgba, w, h, {
+        quality: opts.quantizerQuality,
+        speed: opts.quantizerSpeed,
+        maxColors: opts.maxColors,
+      });
+      if (result) {
+        return { indexed: result.indexed, palette: result.palette };
+      }
+    } catch {
+      // imagequant can fail on very small crops — fall through to NeuQuant
+    }
+    const pal = neuquant(rgba, 1);
+    const idx = floydSteinberg(rgba, w, h, pal, opts.ditherSerpentine);
+    return { indexed: idx, palette: pal };
+  }
+
+  // NeuQuant path
+  const pal = neuquantPalette ?? neuquant(rgba, opts.quantizerQuality);
+  const idx = opts.dither === "floyd-steinberg"
+    ? floydSteinberg(rgba, w, h, pal, opts.ditherSerpentine)
+    : mapNearest(rgba, pal);
+  return { indexed: idx, palette: pal };
+}
+
+// ── Legacy pipeline ─────────────────────────────────────────────
+
+async function encodeLegacyPipeline(
+  frames: EncodeFrame[],
+  width: number,
+  height: number,
+  opts: ResolvedOptions,
+): Promise<Uint8Array> {
   // ── Phase 1: Generate palettes + dither ──
 
   const indexed: Array<{
@@ -245,12 +471,11 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     delay: number;
   }> = new Array(frames.length);
 
-  if (opts.quantizer === "imagequant" && opts.palette !== "global") {
-    // Per-frame imagequant: each frame gets its own palette + dithering
+  if (opts.quantizer === "imagequant") {
     for (let i = 0; i < frames.length; i++) {
       const result = await quantizeImagequant(
         frames[i].data, width, height,
-        { quality: opts.imagequantQuality, speed: opts.imagequantSpeed, maxColors: 256 },
+        { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
       );
 
       let pixels: Uint8Array;
@@ -260,7 +485,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
         pixels = result.indexed;
         palette = result.palette;
       } else {
-        palette = neuquant(frames[i].data, opts.quality);
+        palette = neuquant(frames[i].data, 1);
         pixels = floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine);
       }
 
@@ -270,34 +495,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
         delay: Math.round((frames[i].delay ?? 100) / 10),
       };
     }
-  } else if (opts.quantizer === "imagequant" && opts.palette === "global") {
-    // Global imagequant palette: pool pixels → one palette → Floyd-Steinberg each frame.
-    // Consistent dithering means frame diff works perfectly.
-    const sampleStep = Math.max(1, Math.floor(frames.length / 10));
-    const poolParts: Uint8ClampedArray[] = [];
-    for (let i = 0; i < frames.length; i += sampleStep) poolParts.push(frames[i].data);
-    const poolSize = poolParts.reduce((s, p) => s + p.length, 0);
-    const pooled = new Uint8ClampedArray(poolSize);
-    let off = 0;
-    for (const p of poolParts) { pooled.set(p, off); off += p.length; }
-    const poolW = width;
-    const poolH = (poolSize / 4) / width;
-
-    const iqResult = await quantizeImagequant(pooled, poolW, poolH, {
-      quality: opts.imagequantQuality, speed: opts.imagequantSpeed, maxColors: 256,
-    });
-    const globalPalette = iqResult ? iqResult.palette : neuquant(pooled, opts.quality);
-
-    for (let i = 0; i < frames.length; i++) {
-      const pixels = floydSteinberg(frames[i].data, width, height, globalPalette, opts.ditherSerpentine);
-      indexed[i] = {
-        indexedPixels: pixels,
-        palette: globalPalette,
-        delay: Math.round((frames[i].delay ?? 100) / 10),
-      };
-    }
   } else {
-    const palettes = generatePalettes(frames, opts.palette, opts.quality);
+    const palettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
 
     if (opts.temporalDither && opts.dither === "floyd-steinberg" && frames.length > 1) {
       let temporalState: TemporalDitherState | null = null;
@@ -342,9 +541,6 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   const gifFrames: GifFrame[] = new Array(frames.length);
 
   if (opts.quantizer === "imagequant") {
-    // Imagequant path: punch transparent holes into dithered output.
-    // imagequant dithers the full frame for optimal quality. We then
-    // overwrite unchanged pixels with a transparent index and crop.
     for (let i = 0; i < indexed.length; i++) {
       const f = indexed[i];
 
@@ -358,8 +554,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
           f.indexedPixels, f.palette,
           frames[i].data, frames[i - 1].data,
           width, height, opts.optimize.frameDiffTolerance,
-          opts.optimize.frameDiffErode ?? 0,
-          opts.optimize.frameDiffDistanceMode ?? "max",
+          opts.optimize.frameDiffErode,
+          opts.optimize.frameDiffDistanceMode,
         );
         gifFrames[i] = {
           indexedPixels: result.indexedPixels, palette: f.palette,
@@ -371,7 +567,6 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
       }
     }
   } else {
-    // NeuQuant path: RGBA-based frame diff (existing approach)
     const disposals = opts.optimize.disposalOptimize
       ? optimizeDisposals(frames, width, height, opts.optimize.frameDiffTolerance)
       : new Array<number>(frames.length).fill(0);
@@ -413,6 +608,8 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   });
 }
 
+// ── Shared helpers ──────────────────────────────────────────────
+
 function punchTransparentHoles(
   currentIndexed: Uint8Array,
   palette: Uint8Array,
@@ -439,8 +636,6 @@ function punchTransparentHoles(
     if (dist > tolerance) changed[i] = 1;
   }
 
-  // Erode transparent mask: any transparent pixel adjacent to a changed
-  // pixel (8-connected) becomes changed. Keeps a dithered border intact.
   for (let e = 0; e < erode; e++) {
     const expand = new Uint8Array(pixelCount);
     for (let y = 0; y < h; y++) {
@@ -458,7 +653,6 @@ function punchTransparentHoles(
     for (let i = 0; i < pixelCount; i++) if (expand[i]) changed[i] = 1;
   }
 
-  // Bounding box + usedByChanged
   const usedByChanged = new Uint8Array(256);
   let minX = w, maxX = -1, minY = h, maxY = -1;
   for (let y = 0; y < h; y++) {

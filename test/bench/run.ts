@@ -828,11 +828,11 @@ async function main() {
 
   console.log(`\n  Report saved: ${reportPath}`);
 
-  // Copy gifhero output GIFs to references/
+  // Copy gifhero and gifski output GIFs to references/
   const refsDir = join(__dirname, "references");
   mkdirSync(refsDir, { recursive: true });
   for (const r of allResults) {
-    if (r.encoder.startsWith("gifhero") && existsSync(r.gifPath)) {
+    if ((r.encoder.startsWith("gifhero") || r.encoder === "gifski") && existsSync(r.gifPath)) {
       const dest = join(refsDir, `${r.fixture}-${r.encoder}.gif`);
       try { writeFileSync(dest, readFileSync(r.gifPath)); } catch {}
     }
