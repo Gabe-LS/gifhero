@@ -38,7 +38,7 @@ export const VERSION = "0.0.1";
 
 export { probeFrames } from "./probe.js";
 export type { ProbeResult } from "./probe.js";
-export { downsample, adaptiveSharpen, resizeFrames } from "./resize.js";
+export { downsample, resizeFrames } from "./resize.js";
 
 // ── Re-exports ───────────────────────────────────────────────────
 
@@ -138,12 +138,10 @@ export interface EncodeOptions {
   lossyLzw?: number;
   /** Loop count: 0 = forever, N > 0 = N times, < 0 = no loop. Default 0. */
   loop?: number;
-  /** Target width for downscaling. Height auto-calculated from aspect ratio. Omit to encode at source size. */
+  /** Target width for downscaling (Lanczos3). Height auto-calculated from aspect ratio. Omit to encode at source size. */
   targetWidth?: number;
   /** Target height for downscaling. Omit to auto-calculate from targetWidth + aspect ratio. */
   targetHeight?: number;
-  /** Apply adaptive sharpening after downscaling. Strength scales with downscale ratio. Default true when downscaling. */
-  sharpen?: boolean;
   /** Frame optimization settings. Omit or set false to disable all optimization. */
   optimize?: OptimizeOptions | false;
 }
@@ -341,7 +339,6 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     const resized = resizeFrames(
       frames, width, height,
       options.targetWidth, options.targetHeight,
-      options.sharpen ?? false,
     );
     width = resized.width;
     height = resized.height;

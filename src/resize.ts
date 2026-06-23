@@ -1,9 +1,9 @@
 /**
- * High-quality image downscaling and adaptive sharpening.
+ * High-quality image downscaling via Lanczos3 resampling.
  *
- * Uses Lanczos3 resampling (sinc-windowed sinc) for downscaling —
- * the same algorithm used by libswscale, Photoshop, and ImageMagick
- * for high-quality size reduction. Pure RGBA arithmetic, no DOM.
+ * Uses sinc-windowed sinc (Lanczos3) — the same algorithm used by
+ * libswscale, Photoshop, and ImageMagick for high-quality size
+ * reduction. Pure RGBA arithmetic, no DOM.
  *
  * @module
  */
@@ -115,102 +115,14 @@ export function downsample(
   return dst;
 }
 
-// ── Adaptive unsharp mask ───────────────────────────────────────
-
 /**
- * Apply adaptive unsharp mask sharpening.
- *
- * Automatically scales the sharpening parameters based on the
- * downscale ratio: more aggressive sharpening for larger reductions
- * to compensate for detail loss during resampling.
- *
- * @param rgba - RGBA pixel data (modified in place)
- * @param width - Image width
- * @param height - Image height
- * @param downscaleRatio - Ratio of original size to current size (e.g. 2.0 for 50% downscale)
- * @param strength - Override sharpening strength (0-1). Auto-scaled from downscaleRatio if omitted.
- */
-export function adaptiveSharpen(
-  rgba: Uint8ClampedArray,
-  width: number,
-  height: number,
-  downscaleRatio: number,
-  strength?: number,
-): void {
-  // Auto-scale: more downscaling → more sharpening
-  // ratio 1.0 → amount 0 (no sharpening needed)
-  // ratio 1.5 → amount ~0.3
-  // ratio 2.0 → amount ~0.5
-  // ratio 3.0 → amount ~0.7
-  // ratio 4.0+ → amount ~0.8 (cap)
-  const amount = strength ?? Math.min(0.5, Math.max(0, (downscaleRatio - 1) * 0.15));
-  if (amount < 0.01) return;
-
-  // Radius scales with ratio too: small downscale → tight radius,
-  // large downscale → wider radius to catch coarser detail loss.
-  const radius = downscaleRatio <= 2 ? 1 : 2;
-
-  // Build Gaussian blur kernel
-  const size = radius * 2 + 1;
-  const sigma = radius * 0.65;
-  const kernel = new Float32Array(size * size);
-  let kSum = 0;
-  for (let ky = -radius; ky <= radius; ky++) {
-    for (let kx = -radius; kx <= radius; kx++) {
-      const v = Math.exp(-(kx * kx + ky * ky) / (2 * sigma * sigma));
-      kernel[(ky + radius) * size + (kx + radius)] = v;
-      kSum += v;
-    }
-  }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= kSum;
-
-  // Blur the image
-  const blurred = new Float32Array(width * height * 3);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let r = 0, g = 0, b = 0;
-      for (let ky = -radius; ky <= radius; ky++) {
-        const sy = Math.max(0, Math.min(height - 1, y + ky));
-        for (let kx = -radius; kx <= radius; kx++) {
-          const sx = Math.max(0, Math.min(width - 1, x + kx));
-          const w = kernel[(ky + radius) * size + (kx + radius)];
-          const si = (sy * width + sx) * 4;
-          r += rgba[si] * w;
-          g += rgba[si + 1] * w;
-          b += rgba[si + 2] * w;
-        }
-      }
-      const di = (y * width + x) * 3;
-      blurred[di] = r;
-      blurred[di + 1] = g;
-      blurred[di + 2] = b;
-    }
-  }
-
-  // Unsharp mask: original + amount * (original - blurred)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const pi = (y * width + x) * 4;
-      const bi = (y * width + x) * 3;
-      rgba[pi] = Math.max(0, Math.min(255,
-        Math.round(rgba[pi] + amount * (rgba[pi] - blurred[bi]))));
-      rgba[pi + 1] = Math.max(0, Math.min(255,
-        Math.round(rgba[pi + 1] + amount * (rgba[pi + 1] - blurred[bi + 1]))));
-      rgba[pi + 2] = Math.max(0, Math.min(255,
-        Math.round(rgba[pi + 2] + amount * (rgba[pi + 2] - blurred[bi + 2]))));
-    }
-  }
-}
-
-/**
- * Downscale and optionally sharpen RGBA frames.
+ * Downscale RGBA frames using Lanczos3 resampling.
  *
  * @param frames - Source RGBA frames
  * @param srcW - Source width
  * @param srcH - Source height
  * @param dstW - Target width
  * @param dstH - Target height (auto-calculated from aspect ratio if omitted)
- * @param sharpen - Apply adaptive sharpening after downscale. Default true.
  * @returns Downscaled frames with new dimensions
  */
 export function resizeFrames(
@@ -219,18 +131,13 @@ export function resizeFrames(
   srcH: number,
   dstW: number,
   dstH?: number,
-  sharpen: boolean = false,
 ): { width: number; height: number; frames: Array<{ data: Uint8ClampedArray; delay?: number }> } {
   const h = dstH ?? Math.round(srcH * (dstW / srcW));
-  const ratio = srcW / dstW;
 
-  const resized = frames.map((f) => {
-    const scaled = downsample(f.data, srcW, srcH, dstW, h);
-    if (sharpen && ratio > 1.05) {
-      adaptiveSharpen(scaled, dstW, h, ratio);
-    }
-    return { data: scaled, delay: f.delay };
-  });
+  const resized = frames.map((f) => ({
+    data: downsample(f.data, srcW, srcH, dstW, h),
+    delay: f.delay,
+  }));
 
   return { width: dstW, height: h, frames: resized };
 }
