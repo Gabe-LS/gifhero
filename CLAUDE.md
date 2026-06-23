@@ -2,13 +2,14 @@
 
 ## What This Is
 A TypeScript GIF encoding library targeting the browser (Chrome extensions, web apps).
-Goal: gifski-level quality in pure JS/WASM — achieved on key benchmarks.
+Beats gifski on VMAF in 24/25 test fixtures at default settings.
 
 ## Tech Stack
 - TypeScript (strict mode), targeting ES2020
 - Build: tsup (ESM + CJS dual output)
 - Test: vitest
 - Custom libimagequant WASM with `set_background` / `set_importance_map` for native GIF transparency
+- Lanczos3 downscaling (pure JS, no DOM)
 - No runtime dependencies (WASM quantizer is an optional peer dep)
 
 ## Conventions
@@ -29,13 +30,13 @@ Scans all source frames to build a content profile before any encoding:
 - **Static mask**: per-pixel flag — 1 if the pixel never changes across all frames (min/max range ≤ tolerance). Drives unconditional transparency.
 - **Motion level**: average fraction of pixels changing per frame (threshold > 5 per channel).
 - **Color complexity**: distinct 6-bit-quantized colors across sampled frames.
-- **Scene changes**: frames where > 60% of pixels change at once.
+- **Keyframes**: scene changes (> 60% pixels change) AND motion-to-static transitions (> 15% motion followed by < 2%). Canvas is reset at keyframes to prevent error accumulation.
 
 Probe runs in < 100ms for 60 frames at 480×270 (pure RGB arithmetic, no quantization).
 
 ### Pass 2: Encode
 
-Two quantizer paths, selected automatically:
+Optional Lanczos3 downscaling via `targetWidth`, then two quantizer paths selected automatically:
 
 #### Background-aware path (default when WASM available)
 
@@ -43,12 +44,13 @@ Uses the custom `imagequant-gif` WASM module (`src/quantizers/imagequant-gif.ts`
 
 ```
 Source frames
-  → Probe: build static mask, compute motion × color complexity
+  → Lanczos3 downscale (if targetWidth set)
+  → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
       complexity > 5000 → 8 (high-motion, complex palette)
       complexity > 1000 → 5 (moderate)
       else              → 2 (low-motion, simple content)
-  → Frame 0: quantizeSimple() → decode to canvas
+  → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
   → Frames 1+:
       1. Zero alpha on static-mask pixels
       2. Zero alpha on pixels where source ≈ canvas (≤ staleThreshold)
@@ -70,9 +72,10 @@ Uses the old imagequant npm package or NeuQuant with post-dither transparency:
 
 ```
 Source frames
+  → Lanczos3 downscale (if targetWidth set)
   → Probe: build static mask
   → Palette strategy from probe (global if colorComplexity < 1000)
-  → Frame 0: quantize → decode to canvas
+  → Frame 0 / keyframes: quantize → decode to canvas
   → Frames 1+:
       1. Find bbox: skip static pixels, source-vs-canvas > staleThreshold
       2. Crop source to bbox
@@ -82,6 +85,10 @@ Source frames
   → Lossy LZW (optional)
   → GIF89a writer
 ```
+
+### Downscaling (`src/resize.ts`)
+
+Lanczos3 (sinc-windowed sinc) resampling — the same algorithm used by libswscale, Photoshop, and ImageMagick. Two-pass separable filter with correct alpha handling. Pure RGBA arithmetic, no DOM or canvas dependency. Works in browser and workers.
 
 ### Custom WASM module (`packages/imagequant-gif-wasm`)
 
@@ -99,7 +106,8 @@ Built with `wasm-pack --target nodejs --no-opt` (122KB WASM binary). Pre-built o
 ```
 src/
 ├── index.ts                    Main encode() API, presets, two-pass pipeline
-├── probe.ts                    Pre-encode frame analysis (static mask, motion, complexity)
+├── probe.ts                    Pre-encode frame analysis (static mask, motion, keyframes)
+├── resize.ts                   Lanczos3 downscaling (pure JS)
 ├── quantizers/
 │   ├── neuquant.ts             NeuQuant neural network quantizer (256 colors)
 │   ├── imagequant.ts           libimagequant WASM wrapper (npm package, fallback)
@@ -129,45 +137,48 @@ packages/
     └── src/lib.rs
 
 test/bench/
-├── run.ts                      Benchmark runner (15 fixtures × 6 encoders)
+├── run.ts                      Benchmark runner (25 fixtures × 4 encoders, 480p + 240p)
 ├── parallel.ts                 Worker-thread parallel encoding (6× speedup)
 ├── encode-worker.ts            Worker script for parallel encoding
 ├── sensitivity.ts              Parameter sensitivity analysis
 ├── sweep-exhaustive.ts         Full parameter grid sweep
+├── REPORT.md                   Full benchmark report vs gifski
 └── references/                 Saved GIF outputs for visual comparison
 ```
 
 ## Presets
 
-### quality
+### quality (default)
 Best visual quality. Background-aware imagequant at maximum precision.
 - quantizer: imagequant (q90, speed 1)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4
-- optimize: subframe, content-adaptive staleThreshold
+- optimize: subframe, content-adaptive staleThreshold, keyframe detection
 
-### balanced (default)
+### balanced
 Good quality with smaller files.
 - quantizer: imagequant (q80, speed 3)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4
-- optimize: subframe, content-adaptive staleThreshold
+- optimize: subframe, content-adaptive staleThreshold, keyframe detection
 
 ### speed
 Fastest encoding. Uses NeuQuant instead of imagequant WASM.
 - quantizer: neuquant (quality 20)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 0
-- optimize: subframe, content-adaptive staleThreshold
+- optimize: subframe, content-adaptive staleThreshold, keyframe detection
 
 ## Encode Options
 
 Key options beyond presets:
+- `targetWidth`: Lanczos3 downscale to this width (height auto from aspect ratio)
+- `targetHeight`: explicit target height (omit to auto-calculate)
 - `imagequantQuality` (0-100): override imagequant quality
 - `imagequantSpeed` (1-10): override imagequant speed
 - `maxColors` (2-256): maximum palette size
-- `palette` ('local' | 'global' | 'crossframe'): palette strategy. 'global' forces a shared palette with full-frame dithering.
-- `dither` ('floyd-steinberg' | false): dithering method. false uses nearest-color mapping.
+- `palette` ('local' | 'global' | 'crossframe'): palette strategy
+- `dither` ('floyd-steinberg' | false): dithering method
 - `lossyLzw` (0-200): lossy LZW compression level
 - `optimize.staleThreshold`: override the content-adaptive transparency threshold
 - `optimize.probeTolerance`: probe static-mask sensitivity
@@ -175,9 +186,9 @@ Key options beyond presets:
 ## Commands
 - `npm run build` — build with tsup
 - `npm run test` — run vitest (52 tests)
-- `npm run bench` — full benchmark (15 fixtures × 6 encoders, ~10 min)
-- `npm run bench:fast` — fast benchmark (6 fixtures × 4 encoders, ~2 min)
-- `npm run bench -- --parallel` — run fixtures concurrently (timing unreliable)
+- `npm run bench` — full benchmark (25 fixtures × 4 encoders)
+- `npm run bench:fast` — fast benchmark (6 fixtures × 4 encoders)
+- `npm run bench -- --parallel` — parallel mode (worker threads + batched VMAF)
 
 ### Building the WASM module
 ```bash
@@ -198,22 +209,30 @@ RUSTFLAGS="-C target-feature=+bulk-memory,+nontrapping-fptoint" \
 | SSIM | ffmpeg | Structural similarity |
 | PSNR | ffmpeg | Peak signal-to-noise ratio |
 | DSSIM | dssim CLI | Per-frame structural dissimilarity |
-| TFS | custom (test/metrics/flicker.ts) | Temporal flicker score across frames |
 
 ### Parallel encoding
-Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own V8 isolate and WASM instance. Achieves 6× speedup on 16 cores. Used by the sensitivity analysis and exhaustive sweep scripts.
+Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own V8 isolate and WASM instance. Achieves 6× speedup on 16 cores.
 
-## Results vs gifski
+## Results vs gifski (both at default settings)
 
-With quality preset + mc=192 + lossyLzw=4 (content-adaptive staleThreshold):
+### 480p (25 fixtures)
 
-| Fixture | gifhero | gifski | Size | VMAF |
-|---------|---------|--------|------|------|
-| bbb-clip-01 (outdoor, high motion) | **4275KB / 94.80** | 4775KB / 94.02 | **-10%** | **+0.78** |
-| bbb-clip-03 (close-up) | **1407KB / 95.91** | 1358KB / 94.84 | +4% | **+1.07** |
-| talking-head (portrait, static bg) | **1933KB / 97.78** | 2020KB / 97.20 | **-4%** | **+0.58** |
+gifhero wins VMAF on **24/25** fixtures (avg 97.7 vs 96.0, **+1.7**). Wins on size on **19/25** (avg **-21%**).
 
-gifhero beats gifski on VMAF across all three benchmarks.
+| Fixture | gifhero | gifski | Δ Size | Δ VMAF |
+|---------|---------|--------|--------|--------|
+| bbb-clip-01 | **4.3MB** / **94.7** | 4.7MB / 94.0 | **-9%** | **+0.7** |
+| bbb-clip-07 | **2.3MB** / **96.8** | 2.6MB / 90.5 | **-12%** | **+6.3** |
+| big-buck-bunny | **2.9MB** / **94.4** | 3.1MB / 91.9 | **-6%** | **+2.5** |
+| talking-head | 2.0MB / **97.9** | **1.2MB** / 95.0 | +67% | **+2.9** |
+| fast-action | 3.6MB / **99.8** | **3.2MB** / 96.4 | +13% | **+3.4** |
+| shapes | **386KB** / **97.2** | 398KB / 94.0 | **-3%** | **+3.2** |
+| screencast | **27KB** / **97.7** | 50KB / 97.5 | **-46%** | **+0.2** |
+| black-and-white | **11.4MB** / **99.9** | 12.1MB / 99.9 | **-6%** | 0.0 |
+
+### 240p (25 fixtures)
+
+gifhero wins VMAF on **23/25** (avg 95.5 vs 91.7, **+3.8**). Advantage doubles at lower resolution.
 
 ## Current Phase
-Phase 4: background-aware quantization. Custom libimagequant WASM with `set_background` produces native transparency at 60%+ per frame — matching gifski's approach. Content-adaptive staleThreshold tunes aggressiveness based on probe motion × color complexity. Two-pass probe+encode pipeline eliminates per-frame threshold heuristics.
+Phase 4 complete. Background-aware quantization via custom libimagequant WASM with `set_background` produces native transparency at 60%+ per frame. Content-adaptive staleThreshold from probe motion × color complexity. Keyframe detection at scene changes and motion-to-static transitions. Lanczos3 downscaling for resolution-independent encoding. Beats gifski on VMAF in 24/25 fixtures at default settings.
