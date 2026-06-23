@@ -27,6 +27,7 @@ import {
 import type { PaletteStrategy } from "./optimize/index.js";
 import { probeFrames } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
+import { resizeFrames } from "./resize.js";
 import {
   quantizeWithBackground as gifQuantBg,
   quantizeSimple as gifQuantSimple,
@@ -37,6 +38,7 @@ export const VERSION = "0.0.1";
 
 export { probeFrames } from "./probe.js";
 export type { ProbeResult } from "./probe.js";
+export { downsample, adaptiveSharpen, resizeFrames } from "./resize.js";
 
 // ── Re-exports ───────────────────────────────────────────────────
 
@@ -136,6 +138,12 @@ export interface EncodeOptions {
   lossyLzw?: number;
   /** Loop count: 0 = forever, N > 0 = N times, < 0 = no loop. Default 0. */
   loop?: number;
+  /** Target width for downscaling. Height auto-calculated from aspect ratio. Omit to encode at source size. */
+  targetWidth?: number;
+  /** Target height for downscaling. Omit to auto-calculate from targetWidth + aspect ratio. */
+  targetHeight?: number;
+  /** Apply adaptive sharpening after downscaling. Strength scales with downscale ratio. Default true when downscaling. */
+  sharpen?: boolean;
   /** Frame optimization settings. Omit or set false to disable all optimization. */
   optimize?: OptimizeOptions | false;
 }
@@ -321,11 +329,26 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
  * @returns Complete GIF file as a byte array
  */
 export async function encode(options: EncodeOptions): Promise<Uint8Array> {
-  const { width, height } = options;
+  let { width, height } = options;
   let { frames } = options;
 
   if (frames.length === 0) {
     throw new Error("At least one frame is required");
+  }
+
+  // ── Downscale if requested ──
+  if (options.targetWidth && options.targetWidth < width) {
+    const resized = resizeFrames(
+      frames, width, height,
+      options.targetWidth, options.targetHeight,
+      options.sharpen ?? false,
+    );
+    width = resized.width;
+    height = resized.height;
+    frames = resized.frames.map((f) => ({
+      data: f.data,
+      delay: f.delay ?? (frames[0]?.delay ?? 100),
+    }));
   }
 
   const opts = resolveOptions(options);
