@@ -1,0 +1,11 @@
+{
+  "name": "imagequant-gif-wasm",
+  "version": "0.1.0",
+  "files": [
+    "imagequant_gif_wasm_bg.wasm",
+    "imagequant_gif_wasm.js",
+    "imagequant_gif_wasm.d.ts"
+  ],
+  "main": "imagequant_gif_wasm.js",
+  "types": "imagequant_gif_wasm.d.ts"
+}
