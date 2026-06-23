@@ -451,7 +451,7 @@ async function encodeSubframePipeline(
   let sharedPalette: Uint8Array | null = null;
   if (useGifQuant && (
     opts.palette === "global" ||
-    downscaleRatio > 1.05
+    downscaleRatio >= 2.0
   )) {
     const step = Math.max(1, Math.floor(frames.length / 10));
     const sampled: Uint8ClampedArray[] = [];

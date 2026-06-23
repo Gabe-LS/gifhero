@@ -118,50 +118,43 @@ function getGitCommit(): string | null {
 
 type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void | Promise<void>;
 
-const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {
-  // ── 480p (native resolution, default settings) ──
+// Resolution variants: suffix → target width divisor (1 = native)
+const RESOLUTIONS: Array<{ suffix: string; divisor: number }> = [
+  { suffix: "",      divisor: 1 },
+  { suffix: "-360p", divisor: 480 / 360 },
+  { suffix: "-240p", divisor: 2 },
+  { suffix: "-160p", divisor: 3 },
+];
 
-  gifski: {
+// Build encoder entries dynamically
+const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {};
+
+for (const { suffix, divisor } of RESOLUTIONS) {
+  const gifskiWidth = divisor === 1 ? null : Math.round(480 / divisor);
+
+  encoders[`gifski${suffix}`] = {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
+      const widthFlag = gifskiWidth ? `--width ${gifskiWidth} ` : "";
       execSync(
-        `gifski --fps 20 -o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
-  },
+  };
 
-  gifhero: {
+  encoders[`gifhero${suffix}`] = {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, await encode({ width, height, frames, preset: "quality" }));
-    },
-  },
-
-  // ── 240p (half resolution) ──
-
-  "gifski-240p": {
-    available: () => hasCommand("gifski"),
-    encode: (framesDir, outputPath) => {
-      execSync(
-        `gifski --fps 20 --width 240 -o "${outputPath}" "${framesDir}"/*.png`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
-      );
-    },
-  },
-
-  "gifhero-240p": {
-    available: () => true,
-    encode: async (framesDir, outputPath) => {
-      const { width, height, frames } = loadPngFrames(framesDir);
+      const targetWidth = divisor > 1 ? Math.round(width / divisor) : undefined;
       writeFileSync(outputPath, await encode({
         width, height, frames, preset: "quality",
-        targetWidth: Math.round(width / 2),
+        ...(targetWidth ? { targetWidth } : {}),
       }));
     },
-  },
-};
+  };
+}
 
 function loadPngFrames(dir: string): {
   width: number;
@@ -748,9 +741,9 @@ const PARALLEL_MODE = process.argv.includes("--parallel");
 const FAST_FIXTURES = new Set([
   "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
-const FAST_ENCODERS = new Set([
-  "gifski", "gifhero", "gifski-240p", "gifhero-240p",
-]);
+const FAST_ENCODERS = new Set(
+  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero${suffix}`]),
+);
 
 // ─────────────────────────────────────────────
 // Main
@@ -817,56 +810,81 @@ async function main() {
   const externalEncoders = available.filter((n) => !n.startsWith("gifhero"));
 
   if (PARALLEL_MODE) {
-    console.log(`  Phase 1: Encoding all fixtures (worker threads for gifhero)...`);
-
     const gifsDir = join(TEMP_DIR, "gifs");
     mkdirSync(gifsDir, { recursive: true });
 
-    // 1a. Encode all gifhero variants via worker threads (16 concurrent)
-    for (const encoderName of gifheroEncoderNames) {
-      const is240p = encoderName.includes("240p");
-      const allJobs: EncodeJob[] = [];
+    // 1a. Batch ALL gifhero variants in one encodeParallel call
+    // (fixtures × resolutions jobs, all 16 workers simultaneously)
+    if (gifheroEncoderNames.length > 0) {
+      console.log(`  Phase 1a: Encoding gifhero (${gifheroEncoderNames.length} variants × ${fixtures.length} fixtures = ${gifheroEncoderNames.length * fixtures.length} jobs)...`);
 
+      const allJobs: EncodeJob[] = [];
+      const jobLabels: Array<{ fixture: string; encoder: string }> = [];
+
+      // Load each fixture once, create jobs for all resolutions
       for (const fixture of fixtures) {
         const framesDir = join(FIXTURES_DIR, fixture);
         const loaded = loadPngFrames(framesDir);
-        let w = loaded.width, h = loaded.height;
-        let frameData = loaded.frames;
 
-        allJobs.push({
-          frames: frameData.map((f) => ({ data: f.data, delay: f.delay })),
-          width: w, height: h,
-          options: {
-            preset: "quality" as const,
-            ...(is240p ? { targetWidth: Math.round(w / 2) } : {}),
-          },
-        });
+        for (const encoderName of gifheroEncoderNames) {
+          const res = RESOLUTIONS.find((r) => encoderName === `gifhero${r.suffix}`);
+          const targetWidth = res && res.divisor > 1
+            ? Math.round(loaded.width / res.divisor) : undefined;
+
+          allJobs.push({
+            frames: loaded.frames.map((f) => ({ data: f.data, delay: f.delay })),
+            width: loaded.width, height: loaded.height,
+            options: {
+              preset: "quality" as const,
+              ...(targetWidth ? { targetWidth } : {}),
+            },
+          });
+          jobLabels.push({ fixture, encoder: encoderName });
+        }
       }
 
       const gifs = await encodeParallel(allJobs, 16, (done, total) => {
-        process.stdout.write(`\r    ${encoderName}: ${done}/${total} fixtures encoded`);
+        process.stdout.write(`\r    gifhero: ${done}/${total} jobs`);
       });
       console.log("");
 
-      for (let j = 0; j < fixtures.length; j++) {
-        const outputPath = join(gifsDir, `${fixtures[j]}-${encoderName}.gif`);
-        writeFileSync(outputPath, gifs[j]);
+      for (let j = 0; j < gifs.length; j++) {
+        const { fixture, encoder } = jobLabels[j];
+        writeFileSync(join(gifsDir, `${fixture}-${encoder}.gif`), gifs[j]);
       }
     }
 
-    // 1b. Encode all external encoders sequentially per fixture
-    // (they fork child processes so they're already CPU-parallel)
-    for (const fixture of fixtures) {
-      const framesDir = join(FIXTURES_DIR, fixture);
-      for (const encoderName of externalEncoders) {
-        const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
-        try {
-          await encoders[encoderName].encode(framesDir, outputPath, countFrames(framesDir));
-        } catch {}
-        process.stdout.write(`\r    external: ${fixture}/${encoderName}     `);
+    // 1b. Batch ALL external encoders via parallel shell commands
+    if (externalEncoders.length > 0) {
+      console.log(`  Phase 1b: Encoding external (${externalEncoders.length} variants × ${fixtures.length} fixtures)...`);
+
+      // Run 8 concurrent gifski/ffmpeg processes at a time
+      const extCmds: Array<{ fixture: string; encoder: string; cmd: string; outputPath: string }> = [];
+      for (const fixture of fixtures) {
+        const framesDir = join(FIXTURES_DIR, fixture);
+        for (const encoderName of externalEncoders) {
+          const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
+          const res = RESOLUTIONS.find((r) => encoderName === `gifski${r.suffix}`);
+          if (res && encoderName.startsWith("gifski")) {
+            const widthFlag = res.divisor > 1 ? `--width ${Math.round(480 / res.divisor)} ` : "";
+            extCmds.push({
+              fixture, encoder: encoderName, outputPath,
+              cmd: `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png 2>/dev/null`,
+            });
+          }
+        }
       }
+
+      for (let batch = 0; batch < extCmds.length; batch += 8) {
+        const slice = extCmds.slice(batch, batch + 8);
+        const shellCmd = slice.map((c) => c.cmd + " &").join("\n") + "\nwait";
+        try {
+          execSync(shellCmd, { shell: "/bin/bash", timeout: 300000, stdio: "ignore" });
+        } catch {}
+        process.stdout.write(`\r    external: ${Math.min(batch + 8, extCmds.length)}/${extCmds.length}`);
+      }
+      console.log("");
     }
-    console.log("");
 
     // 2. Measure all metrics — VMAF in parallel batches via shell
     console.log(`  Phase 2: Measuring metrics...`);
