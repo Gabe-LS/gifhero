@@ -71,6 +71,10 @@ export interface OptimizeOptions {
   holeTolerance?: number;
   /** Flip isolated opaque pixels to transparent when surrounded by transparency. Default true. */
   transparencyEqualization?: boolean;
+  /** Stale transparency threshold: max palette-vs-canvas color distance before flipping transparent to opaque. Default 3. */
+  staleThreshold?: number;
+  /** Transparency equalization: minimum transparent neighbors to flip opaque pixel to transparent. Default 6. */
+  transeqNeighborThreshold?: number;
   /** Enable disposal method optimization (neuquant legacy path). Default true. */
   disposalOptimize?: boolean;
   /** Drop near-duplicate frames whose SSIM exceeds this threshold (0–1). Default 0 (disabled). */
@@ -100,6 +104,12 @@ export interface EncodeOptions {
   quantizer?: "imagequant" | "neuquant";
   /** NeuQuant sampling quality 1–30 (1 = best, 30 = fastest). Only used when quantizer='neuquant'. */
   quality?: number;
+  /** Imagequant quality 0–100 (higher = better). Only used when quantizer='imagequant'. */
+  imagequantQuality?: number;
+  /** Imagequant speed 1–10 (1 = slowest/best, 10 = fastest). Only used when quantizer='imagequant'. */
+  imagequantSpeed?: number;
+  /** Maximum palette colors 2–256. Default 256. */
+  maxColors?: number;
   /** Palette strategy for multi-frame animations. */
   palette?: PaletteStrategy;
   /** Dithering method, or false to disable. */
@@ -125,6 +135,8 @@ interface ResolvedOptimize {
   cropTolerance: number;
   holeTolerance: number;
   transparencyEqualization: boolean;
+  staleThreshold: number;
+  transeqNeighborThreshold: number;
   disposalOptimize: boolean;
   dropThreshold: number;
   // Legacy fields
@@ -167,6 +179,8 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
+      staleThreshold: 3,
+      transeqNeighborThreshold: 6,
       disposalOptimize: true,
       dropThreshold: 0,
       frameDiff: true,
@@ -192,6 +206,8 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
+      staleThreshold: 3,
+      transeqNeighborThreshold: 6,
       disposalOptimize: true,
       dropThreshold: 0,
       frameDiff: true,
@@ -217,6 +233,8 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
+      staleThreshold: 3,
+      transeqNeighborThreshold: 6,
       disposalOptimize: false,
       dropThreshold: 0,
       frameDiff: true,
@@ -234,7 +252,8 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
   if (options.optimize === false) {
     userOpt = {
       subframe: false, cropTolerance: 0, holeTolerance: 0,
-      transparencyEqualization: false, disposalOptimize: false, dropThreshold: 0,
+      transparencyEqualization: false, staleThreshold: 3, transeqNeighborThreshold: 6,
+      disposalOptimize: false, dropThreshold: 0,
       frameDiff: false, frameDiffTolerance: 0, frameDiffErode: 0, frameDiffDistanceMode: "max",
     };
   } else if (options.optimize) {
@@ -244,6 +263,8 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
       cropTolerance: o.cropTolerance ?? base.optimize.cropTolerance,
       holeTolerance: o.holeTolerance ?? base.optimize.holeTolerance,
       transparencyEqualization: o.transparencyEqualization ?? base.optimize.transparencyEqualization,
+      staleThreshold: o.staleThreshold ?? base.optimize.staleThreshold,
+      transeqNeighborThreshold: o.transeqNeighborThreshold ?? base.optimize.transeqNeighborThreshold,
       disposalOptimize: o.disposalOptimize ?? base.optimize.disposalOptimize,
       dropThreshold: o.dropThreshold ?? base.optimize.dropThreshold,
       frameDiff: o.frameDiff ?? base.optimize.frameDiff,
@@ -260,9 +281,9 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
     quantizer,
     quantizerQuality: quantizer === "neuquant"
       ? (options.quality ?? base.quantizerQuality)
-      : base.quantizerQuality,
-    quantizerSpeed: base.quantizerSpeed,
-    maxColors: base.maxColors,
+      : (options.imagequantQuality ?? base.quantizerQuality),
+    quantizerSpeed: options.imagequantSpeed ?? base.quantizerSpeed,
+    maxColors: options.maxColors ?? base.maxColors,
     palette: options.palette ?? base.palette,
     dither: options.dither !== undefined ? options.dither : base.dither,
     ditherSerpentine: options.ditherSerpentine ?? base.ditherSerpentine,
@@ -468,6 +489,8 @@ async function encodeSubframePipeline(
       bbox.minX, bbox.minY, cw, ch, width,
       opts.optimize.holeTolerance,
       opts.optimize.transparencyEqualization,
+      opts.optimize.staleThreshold,
+      opts.optimize.transeqNeighborThreshold,
     );
 
     // Trim unused palette entries

@@ -54,18 +54,16 @@ export function cropRgba(
 /**
  * Find the bounding box of pixels that need re-encoding.
  *
- * A pixel is "changed" if EITHER the source differs from the
- * previous source by more than cropTolerance, OR the source
- * differs from the decoded canvas by more than holeTolerance.
- * The first condition catches scene changes; the second catches
- * stale canvas pixels (dithering artifacts from earlier frames).
+ * A pixel is "changed" if the source differs from the decoded
+ * canvas by more than holeTolerance. This single comparison
+ * catches both scene changes and stale canvas pixels.
  *
  * @param curr - Current source frame RGBA
- * @param prev - Previous source frame RGBA
+ * @param prev - Previous source frame RGBA (unused, kept for API compat)
  * @param canvas - Decoded canvas RGBA (what the decoder shows)
  * @param w - Frame width
  * @param h - Frame height
- * @param cropTolerance - Source-vs-source noise threshold
+ * @param _cropTolerance - Unused (canvas comparison subsumes this)
  * @param holeTolerance - Source-vs-canvas staleness threshold
  * @returns Bounding box, or null if no pixels changed
  */
@@ -75,24 +73,19 @@ export function findChangedBbox(
   canvas: Uint8ClampedArray,
   w: number,
   h: number,
-  cropTolerance: number,
+  _cropTolerance: number,
   holeTolerance: number,
 ): { minX: number; maxX: number; minY: number; maxY: number } | null {
   let minX = w, maxX = -1, minY = h, maxY = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const si = (y * w + x) * 4;
-      const srcDiff = Math.max(
-        Math.abs(curr[si] - prev[si]),
-        Math.abs(curr[si + 1] - prev[si + 1]),
-        Math.abs(curr[si + 2] - prev[si + 2]),
-      );
       const canvasDiff = Math.max(
         Math.abs(curr[si] - canvas[si]),
         Math.abs(curr[si + 1] - canvas[si + 1]),
         Math.abs(curr[si + 2] - canvas[si + 2]),
       );
-      if (srcDiff > cropTolerance || canvasDiff > holeTolerance) {
+      if (canvasDiff > holeTolerance) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -136,20 +129,24 @@ export function buildSubframe(
   fullW: number,
   holeTolerance: number,
   enableTranseq: boolean,
+  staleThreshold: number = 3,
+  transeqNeighborThreshold: number = 6,
 ): SubframeResult {
   const pixelCount = cw * ch;
+  const numColors = (palette.length / 3) | 0;
 
   // ── Mark changed pixels (source vs decoded canvas) ──
   const changed = new Uint8Array(pixelCount);
   for (let y = 0; y < ch; y++) {
     for (let x = 0; x < cw; x++) {
+      const pi = y * cw + x;
       const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
       const d = Math.max(
         Math.abs(currRgba[si] - canvasRgba[si]),
         Math.abs(currRgba[si + 1] - canvasRgba[si + 1]),
         Math.abs(currRgba[si + 2] - canvasRgba[si + 2]),
       );
-      if (d > holeTolerance) changed[y * cw + x] = 1;
+      if (d > holeTolerance) changed[pi] = 1;
     }
   }
 
@@ -178,7 +175,6 @@ export function buildSubframe(
     if (changed[i]) usedByChanged[indexedPixels[i]] = 1;
   }
 
-  const numColors = (palette.length / 3) | 0;
   let palBits = 1;
   while ((1 << palBits) < numColors) palBits++;
   const maxIdx = (1 << palBits) - 1;
@@ -186,6 +182,42 @@ export function buildSubframe(
   let tIdx = -1;
   for (let i = maxIdx; i >= 0; i--) {
     if (!usedByChanged[i]) { tIdx = i; break; }
+  }
+
+  // If all palette entries are used by changed pixels, evict the
+  // least-used entry: reassign its opaque pixels to their nearest
+  // alternative color, freeing the slot for transparency.
+  let pixels = indexedPixels;
+  if (tIdx < 0) {
+    const changedCount = new Uint32Array(256);
+    for (let i = 0; i < pixelCount; i++) {
+      if (changed[i]) changedCount[indexedPixels[i]]++;
+    }
+    let minCount = 0x7fffffff;
+    let evictIdx = 0;
+    for (let i = 0; i < numColors; i++) {
+      if (changedCount[i] > 0 && changedCount[i] < minCount) {
+        minCount = changedCount[i];
+        evictIdx = i;
+      }
+    }
+    tIdx = evictIdx;
+    usedByChanged[evictIdx] = 0;
+    pixels = indexedPixels.slice();
+    const evR = palette[evictIdx * 3], evG = palette[evictIdx * 3 + 1], evB = palette[evictIdx * 3 + 2];
+    let bestAlt = 0, bestDist = 0x7fffffff;
+    for (let p = 0; p < numColors; p++) {
+      if (p === evictIdx) continue;
+      const po = p * 3;
+      const d = Math.abs(evR - palette[po]) + Math.abs(evG - palette[po + 1]) + Math.abs(evB - palette[po + 2]);
+      if (d < bestDist) { bestDist = d; bestAlt = p; }
+    }
+    for (let i = 0; i < pixelCount; i++) {
+      if (changed[i] && pixels[i] === evictIdx) {
+        pixels[i] = bestAlt;
+      }
+    }
+    usedByChanged[bestAlt] = 1;
   }
 
   if (tIdx < 0) {
@@ -202,15 +234,14 @@ export function buildSubframe(
   // ── Punch holes ──
   const punched = new Uint8Array(pixelCount);
   for (let i = 0; i < pixelCount; i++) {
-    punched[i] = changed[i] ? indexedPixels[i] : tIdx;
+    punched[i] = changed[i] ? pixels[i] : tIdx;
   }
 
   // ── Stale transparency check ──
-  // For each transparent pixel, verify that the canvas color is close to
-  // what the current palette would render. If the nearest palette color
-  // for the source pixel diverges from the canvas by > 3, the canvas is
-  // showing stale data — flip the pixel to opaque.
-  const numPalEntries = numColors;
+  // For each transparent pixel, verify that the canvas color is close
+  // to what the current palette would render. If the nearest palette
+  // color for the source pixel diverges from the canvas beyond the
+  // threshold, the canvas is showing stale data — flip opaque.
   for (let y = 0; y < ch; y++) {
     for (let x = 0; x < cw; x++) {
       const i = y * cw + x;
@@ -219,29 +250,29 @@ export function buildSubframe(
       const sr = currRgba[si], sg = currRgba[si + 1], sb = currRgba[si + 2];
       const cr = canvasRgba[si], cg = canvasRgba[si + 1], cb = canvasRgba[si + 2];
 
-      // Find nearest palette color to the source pixel
       let bestIdx = 0, bestDist = 0x7fffffff;
-      for (let p = 0; p < numPalEntries; p++) {
+      for (let p = 0; p < numColors; p++) {
         const po = p * 3;
         const d = Math.abs(sr - palette[po]) + Math.abs(sg - palette[po + 1]) + Math.abs(sb - palette[po + 2]);
         if (d < bestDist) { bestDist = d; bestIdx = p; }
       }
 
-      // Compare what the palette would render vs what the canvas shows
       const po = bestIdx * 3;
       const palCanvasDiff = Math.max(
         Math.abs(palette[po] - cr),
         Math.abs(palette[po + 1] - cg),
         Math.abs(palette[po + 2] - cb),
       );
-      if (palCanvasDiff > 3) {
+      if (palCanvasDiff > staleThreshold) {
         punched[i] = bestIdx;
         usedByChanged[bestIdx] = 1;
       }
     }
   }
 
-  // ── Transparency run equalization (also vs canvas) ──
+  // ── Transparency run equalization ──
+  // Isolated opaque pixels surrounded by transparency are flipped
+  // transparent if the palette's nearest color is close to the canvas.
   if (enableTranseq) {
     for (let y = 0; y < ch; y++) {
       for (let x = 0; x < cw; x++) {
@@ -254,14 +285,14 @@ export function buildSubframe(
             if (punched[dy * cw + dx] === tIdx) tNeighbors++;
           }
         }
-        if (tNeighbors < 6) continue;
+        if (tNeighbors < transeqNeighborThreshold) continue;
         const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
         const d = Math.max(
           Math.abs(currRgba[si] - canvasRgba[si]),
           Math.abs(currRgba[si + 1] - canvasRgba[si + 1]),
           Math.abs(currRgba[si + 2] - canvasRgba[si + 2]),
         );
-        if (d <= 3) punched[i] = tIdx;
+        if (d <= staleThreshold) punched[i] = tIdx;
       }
     }
   }
