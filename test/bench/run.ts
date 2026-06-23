@@ -118,24 +118,22 @@ function getGitCommit(): string | null {
 
 type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void | Promise<void>;
 
-// Resolution variants: suffix → target width divisor (1 = native)
-const RESOLUTIONS: Array<{ suffix: string; divisor: number }> = [
-  { suffix: "",      divisor: 1 },
-  { suffix: "-360p", divisor: 480 / 360 },
-  { suffix: "-240p", divisor: 2 },
-  { suffix: "-160p", divisor: 3 },
+// Resolution variants: suffix → target width (null = native)
+const RESOLUTIONS: Array<{ suffix: string; targetWidth: number | null }> = [
+  { suffix: "",      targetWidth: null },
+  { suffix: "-360p", targetWidth: 360 },
+  { suffix: "-240p", targetWidth: 240 },
+  { suffix: "-160p", targetWidth: 160 },
 ];
 
 // Build encoder entries dynamically
 const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {};
 
-for (const { suffix, divisor } of RESOLUTIONS) {
-  const gifskiWidth = divisor === 1 ? null : Math.round(480 / divisor);
-
+for (const { suffix, targetWidth } of RESOLUTIONS) {
   encoders[`gifski${suffix}`] = {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
-      const widthFlag = gifskiWidth ? `--width ${gifskiWidth} ` : "";
+      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
         `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
@@ -147,10 +145,10 @@ for (const { suffix, divisor } of RESOLUTIONS) {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
-      const targetWidth = divisor > 1 ? Math.round(width / divisor) : undefined;
+      const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
       writeFileSync(outputPath, await encode({
         width, height, frames, preset: "quality",
-        ...(targetWidth ? { targetWidth } : {}),
+        ...(tw ? { targetWidth: tw } : {}),
       }));
     },
   };
@@ -828,15 +826,15 @@ async function main() {
 
         for (const encoderName of gifheroEncoderNames) {
           const res = RESOLUTIONS.find((r) => encoderName === `gifhero${r.suffix}`);
-          const targetWidth = res && res.divisor > 1
-            ? Math.round(loaded.width / res.divisor) : undefined;
+          const tw = res?.targetWidth && res.targetWidth < loaded.width
+            ? res.targetWidth : undefined;
 
           allJobs.push({
             frames: loaded.frames.map((f) => ({ data: f.data, delay: f.delay })),
             width: loaded.width, height: loaded.height,
             options: {
               preset: "quality" as const,
-              ...(targetWidth ? { targetWidth } : {}),
+              ...(tw ? { targetWidth: tw } : {}),
             },
           });
           jobLabels.push({ fixture, encoder: encoderName });
@@ -866,7 +864,7 @@ async function main() {
           const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
           const res = RESOLUTIONS.find((r) => encoderName === `gifski${r.suffix}`);
           if (res && encoderName.startsWith("gifski")) {
-            const widthFlag = res.divisor > 1 ? `--width ${Math.round(480 / res.divisor)} ` : "";
+            const widthFlag = res.targetWidth ? `--width ${res.targetWidth} ` : "";
             extCmds.push({
               fixture, encoder: encoderName, outputPath,
               cmd: `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png 2>/dev/null`,
