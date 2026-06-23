@@ -60,17 +60,12 @@ export function findChangedBbox(
       if (staticMask[pi]) continue;
 
       const si = pi * 4;
-      const srcDiff = Math.max(
-        Math.abs(curr[si] - prev[si]),
-        Math.abs(curr[si + 1] - prev[si + 1]),
-        Math.abs(curr[si + 2] - prev[si + 2]),
-      );
       const canvasDiff = Math.max(
         Math.abs(curr[si] - canvas[si]),
         Math.abs(curr[si + 1] - canvas[si + 1]),
         Math.abs(curr[si + 2] - canvas[si + 2]),
       );
-      if (srcDiff > 2 || canvasDiff > staleThreshold) {
+      if (canvasDiff > staleThreshold) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -94,7 +89,6 @@ export function buildSubframe(
   indexedPixels: Uint8Array,
   palette: Uint8Array,
   currRgba: Uint8ClampedArray,
-  prevRgba: Uint8ClampedArray,
   canvasRgba: Uint8ClampedArray,
   staticMask: Uint8Array,
   cropLeft: number,
@@ -112,20 +106,10 @@ export function buildSubframe(
     for (let x = 0; x < cw; x++) {
       const pi = y * cw + x;
       const fi = (cropTop + y) * fullW + (cropLeft + x);
-      const si = fi * 4;
 
       if (staticMask[fi]) continue;
 
-      const srcDiff = Math.max(
-        Math.abs(currRgba[si] - prevRgba[si]),
-        Math.abs(currRgba[si + 1] - prevRgba[si + 1]),
-        Math.abs(currRgba[si + 2] - prevRgba[si + 2]),
-      );
-      if (srcDiff > 2) {
-        changed[pi] = 1;
-        continue;
-      }
-
+      const si = fi * 4;
       const canvasDiff = Math.max(
         Math.abs(currRgba[si] - canvasRgba[si]),
         Math.abs(currRgba[si + 1] - canvasRgba[si + 1]),

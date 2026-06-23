@@ -187,7 +187,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
-      staleThreshold: 3,
+      staleThreshold: 8,
       probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: true,
@@ -215,7 +215,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
-      staleThreshold: 3,
+      staleThreshold: 8,
       probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: true,
@@ -243,7 +243,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       cropTolerance: 5,
       holeTolerance: 0,
       transparencyEqualization: true,
-      staleThreshold: 3,
+      staleThreshold: 8,
       probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: false,
@@ -525,7 +525,7 @@ async function encodeSubframePipeline(
     }
 
     const sub = buildSubframe(
-      indexed, palette, curr, prev, canvasRgba, probe.staticMask,
+      indexed, palette, curr, canvasRgba, probe.staticMask,
       bbox.minX, bbox.minY, cw, ch, width,
       staleThreshold,
     );
