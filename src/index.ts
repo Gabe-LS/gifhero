@@ -513,7 +513,7 @@ async function encodeSubframePipeline(
   // low-complexity photographic content (talking-head) benefits from
   // moderate transparency when per-frame dithering shifts.
   const complexity = probe.motionLevel * probe.colorComplexity;
-  const motionFloor = probe.motionLevel > 0.01 ? 5 : 2;
+  const motionFloor = probe.motionLevel > 0.01 ? 5 : 3;
   const autoThreshold = complexity > 5000 ? 8
     : complexity > 1000 ? Math.max(5, motionFloor)
     : motionFloor;
