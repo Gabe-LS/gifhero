@@ -446,10 +446,15 @@ async function encodeSubframePipeline(
   }
 
   // ── Shared palette for consistent transparency ──
-  // Use shared palette when downscaling (per-frame palettes fragment
-  // at lower resolutions) or when user explicitly requests global.
+  // Use shared palette when downscaling AND the static mask can't
+  // drive enough transparency on its own. High static fraction
+  // means the probe already handles transparency well with per-frame
+  // palettes — shared palette would just reduce quality.
   let sharedPalette: Uint8Array | null = null;
-  if (useGifQuant && (downscaleRatio > 1.05 || opts.palette === "global")) {
+  if (useGifQuant && (
+    opts.palette === "global" ||
+    (downscaleRatio > 1.05 && probe.staticFraction < 0.1)
+  )) {
     const step = Math.max(1, Math.floor(frames.length / 10));
     const sampled: Uint8ClampedArray[] = [];
     for (let f = 0; f < frames.length; f += step) sampled.push(frames[f].data);
