@@ -27,6 +27,11 @@ import {
 import type { PaletteStrategy } from "./optimize/index.js";
 import { probeFrames } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
+import {
+  quantizeWithBackground as gifQuantBg,
+  quantizeSimple as gifQuantSimple,
+} from "./quantizers/imagequant-gif.js";
+import type { GifQuantResult } from "./quantizers/imagequant-gif.js";
 
 export const VERSION = "0.0.1";
 
@@ -376,14 +381,25 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
 // ── Sub-frame pipeline ──────────────────────────────────────────
 
+function rgbaToRgbPalette(rgba: Uint8Array, count: number): Uint8Array {
+  const rgb = new Uint8Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    rgb[i * 3] = rgba[i * 4];
+    rgb[i * 3 + 1] = rgba[i * 4 + 1];
+    rgb[i * 3 + 2] = rgba[i * 4 + 2];
+  }
+  return rgb;
+}
+
 async function encodeSubframePipeline(
   frames: EncodeFrame[],
   width: number,
   height: number,
   opts: ResolvedOptions,
 ): Promise<GifFrame[]> {
+  const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
-  const canvasRgba = new Uint8ClampedArray(width * height * 4);
+  const canvasRgba = new Uint8ClampedArray(numPixels * 4);
 
   // ── Pass 1: Probe ──
   const probe = probeFrames(
@@ -391,57 +407,75 @@ async function encodeSubframePipeline(
     opts.optimize.probeTolerance,
   );
 
-  // ── Palette strategy ──
-  // Global palette when user requested it or when probe detects
-  // low color complexity (256 entries cover all colors easily).
-  const useGlobalPalette =
-    opts.palette === "global" ||
-    (probe.colorComplexity < 1000 && opts.palette !== "local");
-
-  let globalPalette: Uint8Array | null = null;
-
-  if (useGlobalPalette) {
-    if (opts.quantizer === "imagequant") {
-      try {
-        const step = Math.max(1, Math.floor(frames.length / 10));
-        const parts: Uint8ClampedArray[] = [];
-        for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
-        const poolSize = parts.reduce((s, p) => s + p.length, 0);
-        const pooled = new Uint8ClampedArray(poolSize);
-        let off = 0;
-        for (const p of parts) { pooled.set(p, off); off += p.length; }
-        const poolResult = await quantizeImagequant(
-          pooled, width, (poolSize / 4) / width,
-          { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
-        );
-        if (poolResult) {
-          globalPalette = trimPalette(poolResult.palette, poolResult.indexed).palette;
-        }
-      } catch {
-        // imagequant unavailable
-      }
-    } else {
-      globalPalette = neuquant(frames[0].data, opts.quantizerQuality);
+  // ── Try background-aware quantizer ──
+  let useGifQuant = false;
+  if (opts.quantizer === "imagequant") {
+    try {
+      gifQuantSimple(
+        new Uint8ClampedArray(4), 1, 1, 80, 4, 4,
+      );
+      useGifQuant = true;
+    } catch {
+      // WASM not available
     }
   }
 
-  // For neuquant non-global, generate palettes upfront
-  let neuquantPalettes: Uint8Array[] | null = null;
-  if (opts.quantizer === "neuquant" && !globalPalette) {
-    neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
+  // ── Importance map (reused across frames) ──
+  const importanceMap = new Uint8Array(numPixels);
+  for (let j = 0; j < numPixels; j++) {
+    importanceMap[j] = probe.staticMask[j] ? 0 : 255;
   }
 
-  // ── Pass 2: Encode with probe data ──
+  // ── Fallback path setup ──
+  const useGlobalPalette = !useGifQuant && (
+    opts.palette === "global" ||
+    (probe.colorComplexity < 1000 && opts.palette !== "local")
+  );
+
+  let globalPalette: Uint8Array | null = null;
+  if (useGlobalPalette && opts.quantizer === "imagequant") {
+    try {
+      const step = Math.max(1, Math.floor(frames.length / 10));
+      const parts: Uint8ClampedArray[] = [];
+      for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
+      const poolSize = parts.reduce((s, p) => s + p.length, 0);
+      const pooled = new Uint8ClampedArray(poolSize);
+      let off = 0;
+      for (const p of parts) { pooled.set(p, off); off += p.length; }
+      const poolResult = await quantizeImagequant(
+        pooled, width, (poolSize / 4) / width,
+        { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
+      );
+      if (poolResult) {
+        globalPalette = trimPalette(poolResult.palette, poolResult.indexed).palette;
+      }
+    } catch {}
+  } else if (useGlobalPalette && opts.quantizer === "neuquant") {
+    globalPalette = neuquant(frames[0].data, opts.quantizerQuality);
+  }
+
+  let neuquantPalettes: Uint8Array[] | null = null;
+  if (opts.quantizer === "neuquant" && !globalPalette && !useGifQuant) {
+    neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
+  }
 
   const staleThreshold = opts.optimize.staleThreshold;
 
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
 
-    // ── Frame 0: full-frame quantization ──
+    // ── Frame 0 ──
     if (i === 0) {
       let indexed: Uint8Array, palette: Uint8Array;
-      if (globalPalette) {
+
+      if (useGifQuant) {
+        const r = gifQuantSimple(
+          frames[0].data, width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
+        );
+        palette = rgbaToRgbPalette(r.palette, r.paletteCount);
+        indexed = r.indexed;
+      } else if (globalPalette) {
         palette = globalPalette;
         indexed = opts.dither === "floyd-steinberg"
           ? floydSteinberg(frames[0].data, width, height, palette, opts.ditherSerpentine)
@@ -451,6 +485,7 @@ async function encodeSubframePipeline(
           frames[0].data, width, height, opts, neuquantPalettes?.[0],
         ));
       }
+
       const trimmed = trimPalette(palette, indexed);
       indexed = trimmed.indexed;
       palette = trimmed.palette;
@@ -463,9 +498,108 @@ async function encodeSubframePipeline(
       continue;
     }
 
-    // ── Frames 1+: probe-driven sub-frame encoding ──
+    // ── Frames 1+: background-aware path ──
 
     const curr = frames[i].data;
+
+    if (useGifQuant) {
+      // Zero alpha on static pixels
+      const inputRgba = new Uint8ClampedArray(curr);
+      for (let j = 0; j < numPixels; j++) {
+        if (probe.staticMask[j]) {
+          inputRgba[j * 4 + 3] = 0;
+        }
+      }
+
+      // Also zero alpha on pixels where source ≈ canvas
+      for (let j = 0; j < numPixels; j++) {
+        if (inputRgba[j * 4 + 3] === 0) continue;
+        const si = j * 4;
+        const d = Math.max(
+          Math.abs(inputRgba[si] - canvasRgba[si]),
+          Math.abs(inputRgba[si + 1] - canvasRgba[si + 1]),
+          Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
+        );
+        if (d <= staleThreshold) {
+          inputRgba[si + 3] = 0;
+        }
+      }
+
+      const r = gifQuantBg(
+        inputRgba, width, height,
+        canvasRgba, importanceMap,
+        opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
+      );
+
+      const tIdx = r.transparentIndex;
+      const rgbPal = rgbaToRgbPalette(r.palette, r.paletteCount);
+
+      // Bounding box of non-transparent pixels
+      let minX = width, maxX = -1, minY = height, maxY = -1;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (r.indexed[y * width + x] !== tIdx) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      if (maxX < 0) {
+        gifFrames[i] = {
+          indexedPixels: new Uint8Array([0]),
+          palette: gifFrames[i - 1].palette,
+          width: 1, height: 1, left: 0, top: 0,
+          delay, disposal: 0, transparentIndex: 0,
+        };
+      } else {
+        const cw = maxX - minX + 1;
+        const ch = maxY - minY + 1;
+        const cropped = new Uint8Array(cw * ch);
+        for (let y = 0; y < ch; y++) {
+          const srcOff = (minY + y) * width + minX;
+          cropped.set(r.indexed.subarray(srcOff, srcOff + cw), y * cw);
+        }
+
+        let framePal: Uint8Array | Uint8Array<ArrayBufferLike> = rgbPal;
+        let framePx: Uint8Array | Uint8Array<ArrayBufferLike> = cropped;
+        let frameTIdx = tIdx;
+        if (tIdx >= 0) {
+          const trimmed = trimPalette(rgbPal, cropped, tIdx);
+          framePal = trimmed.palette;
+          framePx = trimmed.indexed;
+          frameTIdx = trimmed.transparentIndex ?? -1;
+        }
+
+        gifFrames[i] = {
+          indexedPixels: framePx,
+          palette: framePal,
+          width: cw, height: ch,
+          left: minX, top: minY,
+          transparentIndex: frameTIdx >= 0 ? frameTIdx : undefined,
+          delay, disposal: 0,
+        };
+      }
+
+      // Update canvas
+      for (let j = 0; j < numPixels; j++) {
+        if (r.indexed[j] !== tIdx) {
+          const pi = r.indexed[j] * 4;
+          const ci = j * 4;
+          canvasRgba[ci] = r.palette[pi];
+          canvasRgba[ci + 1] = r.palette[pi + 1];
+          canvasRgba[ci + 2] = r.palette[pi + 2];
+          canvasRgba[ci + 3] = 255;
+        }
+      }
+
+      continue;
+    }
+
+    // ── Frames 1+: fallback path (old pipeline) ──
+
     const prev = frames[i - 1].data;
 
     const bbox = findChangedBbox(
