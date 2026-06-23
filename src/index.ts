@@ -511,7 +511,9 @@ async function encodeSubframePipeline(
         }
       }
 
-      // Also zero alpha on pixels where source ≈ canvas
+      // Zero alpha on pixels where source ≈ canvas within tight
+      // threshold. The quantizer handles edge blending via
+      // set_background, so we only mark genuinely unchanged pixels.
       for (let j = 0; j < numPixels; j++) {
         if (inputRgba[j * 4 + 3] === 0) continue;
         const si = j * 4;
@@ -520,7 +522,7 @@ async function encodeSubframePipeline(
           Math.abs(inputRgba[si + 1] - canvasRgba[si + 1]),
           Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
         );
-        if (d <= staleThreshold) {
+        if (d <= 5) {
           inputRgba[si + 3] = 0;
         }
       }
