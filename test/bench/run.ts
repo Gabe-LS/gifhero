@@ -170,27 +170,11 @@ const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> 
     },
   },
 
-  "gifhero-quality": {
+  "gifhero": {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
       writeFileSync(outputPath, await encode({ width, height, frames, preset: "quality" }));
-    },
-  },
-
-  "gifhero-balanced": {
-    available: () => true,
-    encode: async (framesDir, outputPath) => {
-      const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, await encode({ width, height, frames, preset: "balanced" }));
-    },
-  },
-
-  "gifhero-speed": {
-    available: () => true,
-    encode: async (framesDir, outputPath) => {
-      const { width, height, frames } = loadPngFrames(framesDir);
-      writeFileSync(outputPath, await encode({ width, height, frames, preset: "speed" }));
     },
   },
 };
@@ -781,7 +765,7 @@ const FAST_FIXTURES = new Set([
   "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
 const FAST_ENCODERS = new Set([
-  "gifski", "gifhero-quality", "gifhero-balanced", "gifhero-speed",
+  "gifski", "gifhero",
 ]);
 
 // ─────────────────────────────────────────────
@@ -846,13 +830,8 @@ async function main() {
   const allResults: EncoderResult[] = [];
 
   // Separate gifhero encoders from external ones
-  const gifheroEncoders = available.filter((n) => n.startsWith("gifhero-"));
-  const externalEncoders = available.filter((n) => !n.startsWith("gifhero-"));
-  const presetMap: Record<string, string> = {
-    "gifhero-quality": "quality",
-    "gifhero-balanced": "balanced",
-    "gifhero-speed": "speed",
-  };
+  const gifheroEncoders = available.filter((n) => n === "gifhero");
+  const externalEncoders = available.filter((n) => n !== "gifhero");
 
   async function benchFixtureParallel(fixture: string) {
     const framesDir = join(FIXTURES_DIR, fixture);
@@ -862,11 +841,11 @@ async function main() {
     // 1. Encode gifhero presets via worker threads (true parallelism)
     if (gifheroEncoders.length > 0) {
       const { width, height, frames } = loadPngFrames(framesDir);
-      const jobs: EncodeJob[] = gifheroEncoders.map((name) => ({
+      const jobs: EncodeJob[] = gifheroEncoders.map(() => ({
         frames: frames.map((f) => ({ data: f.data, delay: f.delay })),
         width,
         height,
-        options: { preset: presetMap[name] as "quality" | "balanced" | "speed" },
+        options: { preset: "quality" as const },
       }));
 
       const gifs = await encodeParallel(jobs, gifheroEncoders.length);
