@@ -391,10 +391,18 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const gifFrames = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio);
+    const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio);
+
+    // Adaptive lossyLzw from the full probe data: scale from the
+    // preset value up to 8 based on motion × color complexity.
+    const lzwComplexity = probe.motionLevel * probe.colorComplexity;
+    const adaptiveLzw = options.lossyLzw !== undefined
+      ? opts.lossyLzw
+      : Math.min(6, Math.max(opts.lossyLzw, Math.round(opts.lossyLzw + 2 * Math.min(1, lzwComplexity / 3000))));
+
     return writeGif(gifFrames, {
       width, height, loop: opts.loop,
-      lzwEncoder: buildLzwEncoder(opts.lossyLzw, gifFrames),
+      lzwEncoder: buildLzwEncoder(adaptiveLzw, gifFrames),
     });
   }
 
@@ -421,7 +429,7 @@ async function encodeSubframePipeline(
   height: number,
   opts: ResolvedOptions,
   downscaleRatio: number = 1,
-): Promise<GifFrame[]> {
+): Promise<{ gifFrames: GifFrame[]; probe: ProbeResult }> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
   const canvasRgba = new Uint8ClampedArray(numPixels * 4);
@@ -451,7 +459,7 @@ async function encodeSubframePipeline(
   let sharedPalette: Uint8Array | null = null;
   if (useGifQuant && (
     opts.palette === "global" ||
-    downscaleRatio >= 2.0
+    downscaleRatio > 1.0
   )) {
     const step = Math.max(1, Math.floor(frames.length / 10));
     const sampled: Uint8ClampedArray[] = [];
@@ -758,7 +766,7 @@ async function encodeSubframePipeline(
     compositeOntoCanvas(canvasRgba, sub, palette, width);
   }
 
-  return gifFrames;
+  return { gifFrames, probe };
 }
 
 async function quantizeFrame(

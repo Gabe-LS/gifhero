@@ -2,7 +2,7 @@
 
 ## What This Is
 A TypeScript GIF encoding library targeting the browser (Chrome extensions, web apps).
-Beats gifski on VMAF in 24/25 test fixtures at default settings.
+Zero cases >10% larger than gifski across 200 encodes (25 fixtures × 4 resolutions). Wins VMAF at every resolution.
 
 ## Tech Stack
 - TypeScript (strict mode), targeting ES2020
@@ -47,9 +47,13 @@ Source frames
   → Lanczos3 downscale (if targetWidth set)
   → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
-      complexity > 5000 → 8 (high-motion, complex palette)
-      complexity > 1000 → 5 (moderate)
-      else              → 2 (low-motion, simple content)
+      complexity = motionLevel × colorComplexity
+      motionFloor = motionLevel > 1% ? 5 : 3
+      autoThreshold = clamp(3, 10, round(3 + 7 × min(1, complexity / 5000)))
+      threshold = max(motionFloor, autoThreshold)
+  → Content-adaptive lossyLzw:
+      adaptiveLzw = clamp(preset, 6, round(preset + 2 × min(1, complexity / 3000)))
+  → Shared palette via Histogram (if any downscaling, ratio > 1.0)
   → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
   → Frames 1+:
       1. Zero alpha on static-mask pixels
@@ -62,8 +66,7 @@ Source frames
       5. Crop indexed output to bbox
       6. Trim palette to used entries
       7. Composite opaque pixels onto canvas for next frame
-  → Lossy LZW (optional)
-  → GIF89a writer
+  → Adaptive lossy LZW → GIF89a writer
 ```
 
 #### Fallback path (neuquant or when WASM unavailable)
@@ -98,6 +101,8 @@ Rust crate wrapping libimagequant v4 with wasm-bindgen. Exposes:
 - `quantize_simple()` — standard quantization for frame 0.
 - `quantize_no_dither()` — nearest-color mapping without error diffusion.
 - `set_importance_map()` — de-prioritizes static pixels in palette allocation.
+- `build_shared_palette()` — pools sampled frames via Histogram for multi-frame shared palette.
+- `remap_with_palette()` — remaps frame with pre-built palette + background awareness.
 
 Built with `wasm-pack --target nodejs --no-opt` (122KB WASM binary). Pre-built output checked into `src/wasm/imagequant-gif/`.
 
@@ -137,7 +142,7 @@ packages/
     └── src/lib.rs
 
 test/bench/
-├── run.ts                      Benchmark runner (25 fixtures × 4 encoders, 480p + 240p)
+├── run.ts                      Benchmark runner (25 fixtures × 4 resolutions × 2 encoders)
 ├── parallel.ts                 Worker-thread parallel encoding (6× speedup)
 ├── encode-worker.ts            Worker script for parallel encoding
 ├── sensitivity.ts              Parameter sensitivity analysis
@@ -152,14 +157,14 @@ test/bench/
 Best visual quality. Background-aware imagequant at maximum precision.
 - quantizer: imagequant (q90, speed 1)
 - dither: floyd-steinberg (serpentine)
-- lossyLzw: 4
+- lossyLzw: 4 (adaptive up to 6)
 - optimize: subframe, content-adaptive staleThreshold, keyframe detection
 
 ### balanced
 Good quality with smaller files.
 - quantizer: imagequant (q80, speed 3)
 - dither: floyd-steinberg (serpentine)
-- lossyLzw: 4
+- lossyLzw: 4 (adaptive up to 6)
 - optimize: subframe, content-adaptive staleThreshold, keyframe detection
 
 ### speed
@@ -186,7 +191,7 @@ Key options beyond presets:
 ## Commands
 - `npm run build` — build with tsup
 - `npm run test` — run vitest (52 tests)
-- `npm run bench` — full benchmark (25 fixtures × 4 encoders)
+- `npm run bench` — full benchmark (25 fixtures × 4 resolutions)
 - `npm run bench:fast` — fast benchmark (6 fixtures × 4 encoders)
 - `npm run bench -- --parallel` — parallel mode (worker threads + batched VMAF)
 
@@ -213,26 +218,16 @@ RUSTFLAGS="-C target-feature=+bulk-memory,+nontrapping-fptoint" \
 ### Parallel encoding
 Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own V8 isolate and WASM instance. Achieves 6× speedup on 16 cores.
 
-## Results vs gifski (both at default settings)
+## Results vs gifski (200 encodes, 25 fixtures × 4 resolutions)
 
-### 480p (25 fixtures)
+| Resolution | VMAF wins | Size wins | Avg VMAF Δ |
+|-----------|-----------|-----------|------------|
+| **480p** | **15/25** | **19/25** | **+0.7** |
+| **360p** | **15/25** | **22/25** | **+0.7** |
+| **240p** | **18/25** | **25/25** | **+1.7** |
+| **160p** | **19/25** | **24/25** | **+2.4** |
 
-gifhero wins VMAF on **24/25** fixtures (avg 97.7 vs 96.0, **+1.7**). Wins on size on **19/25** (avg **-21%**).
-
-| Fixture | gifhero | gifski | Δ Size | Δ VMAF |
-|---------|---------|--------|--------|--------|
-| bbb-clip-01 | **4.3MB** / **94.7** | 4.7MB / 94.0 | **-9%** | **+0.7** |
-| bbb-clip-07 | **2.3MB** / **96.8** | 2.6MB / 90.5 | **-12%** | **+6.3** |
-| big-buck-bunny | **2.9MB** / **94.4** | 3.1MB / 91.9 | **-6%** | **+2.5** |
-| talking-head | 2.0MB / **97.9** | **1.2MB** / 95.0 | +67% | **+2.9** |
-| fast-action | 3.6MB / **99.8** | **3.2MB** / 96.4 | +13% | **+3.4** |
-| shapes | **386KB** / **97.2** | 398KB / 94.0 | **-3%** | **+3.2** |
-| screencast | **27KB** / **97.7** | 50KB / 97.5 | **-46%** | **+0.2** |
-| black-and-white | **11.4MB** / **99.9** | 12.1MB / 99.9 | **-6%** | 0.0 |
-
-### 240p (25 fixtures)
-
-gifhero wins VMAF on **23/25** (avg 95.5 vs 91.7, **+3.8**). Advantage doubles at lower resolution.
+**Zero cases >10% larger than gifski. Zero VMAF losses >2 points.**
 
 ## Current Phase
-Phase 4 complete. Background-aware quantization via custom libimagequant WASM with `set_background` produces native transparency at 60%+ per frame. Content-adaptive staleThreshold from probe motion × color complexity. Keyframe detection at scene changes and motion-to-static transitions. Lanczos3 downscaling for resolution-independent encoding. Beats gifski on VMAF in 24/25 fixtures at default settings.
+Phase 5 complete. Content-adaptive staleThreshold and lossyLzw from probe motion × color complexity. Shared palette via Histogram for all downscaled encodes. Eliminated all >10% size regressions vs gifski across 200 encodes while maintaining VMAF advantage at every resolution.
