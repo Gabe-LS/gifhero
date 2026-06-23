@@ -25,8 +25,13 @@ import {
   countUsedColors,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
+import { probeFrames } from "./probe.js";
+import type { ProbeResult } from "./probe.js";
 
 export const VERSION = "0.0.1";
+
+export { probeFrames } from "./probe.js";
+export type { ProbeResult } from "./probe.js";
 
 // ── Re-exports ───────────────────────────────────────────────────
 
@@ -71,8 +76,10 @@ export interface OptimizeOptions {
   holeTolerance?: number;
   /** Flip isolated opaque pixels to transparent when surrounded by transparency. Default true. */
   transparencyEqualization?: boolean;
-  /** Stale transparency threshold: max palette-vs-canvas color distance before flipping transparent to opaque. Default 3. */
+  /** Stale transparency threshold: max per-channel diff for canvas-acceptable pixels. Default 3. */
   staleThreshold?: number;
+  /** Probe tolerance: max per-channel range for a pixel to be considered static. Default 3. */
+  probeTolerance?: number;
   /** Transparency equalization: minimum transparent neighbors to flip opaque pixel to transparent. Default 6. */
   transeqNeighborThreshold?: number;
   /** Enable disposal method optimization (neuquant legacy path). Default true. */
@@ -136,6 +143,7 @@ interface ResolvedOptimize {
   holeTolerance: number;
   transparencyEqualization: boolean;
   staleThreshold: number;
+  probeTolerance: number;
   transeqNeighborThreshold: number;
   disposalOptimize: boolean;
   dropThreshold: number;
@@ -180,6 +188,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       holeTolerance: 0,
       transparencyEqualization: true,
       staleThreshold: 3,
+      probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: true,
       dropThreshold: 0,
@@ -207,6 +216,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       holeTolerance: 0,
       transparencyEqualization: true,
       staleThreshold: 3,
+      probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: true,
       dropThreshold: 0,
@@ -234,6 +244,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       holeTolerance: 0,
       transparencyEqualization: true,
       staleThreshold: 3,
+      probeTolerance: 3,
       transeqNeighborThreshold: 6,
       disposalOptimize: false,
       dropThreshold: 0,
@@ -252,7 +263,7 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
   if (options.optimize === false) {
     userOpt = {
       subframe: false, cropTolerance: 0, holeTolerance: 0,
-      transparencyEqualization: false, staleThreshold: 3, transeqNeighborThreshold: 6,
+      transparencyEqualization: false, staleThreshold: 3, probeTolerance: 3, transeqNeighborThreshold: 6,
       disposalOptimize: false, dropThreshold: 0,
       frameDiff: false, frameDiffTolerance: 0, frameDiffErode: 0, frameDiffDistanceMode: "max",
     };
@@ -264,6 +275,7 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
       holeTolerance: o.holeTolerance ?? base.optimize.holeTolerance,
       transparencyEqualization: o.transparencyEqualization ?? base.optimize.transparencyEqualization,
       staleThreshold: o.staleThreshold ?? base.optimize.staleThreshold,
+      probeTolerance: o.probeTolerance ?? base.optimize.probeTolerance,
       transeqNeighborThreshold: o.transeqNeighborThreshold ?? base.optimize.transeqNeighborThreshold,
       disposalOptimize: o.disposalOptimize ?? base.optimize.disposalOptimize,
       dropThreshold: o.dropThreshold ?? base.optimize.dropThreshold,
@@ -373,27 +385,24 @@ async function encodeSubframePipeline(
   const gifFrames: GifFrame[] = new Array(frames.length);
   const canvasRgba = new Uint8ClampedArray(width * height * 4);
 
-  // For neuquant, generate palettes upfront from full frames
-  let neuquantPalettes: Uint8Array[] | null = null;
-  if (opts.quantizer === "neuquant") {
-    neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
-  }
+  // ── Pass 1: Probe ──
+  const probe = probeFrames(
+    frames.map((f) => f.data), width, height,
+    opts.optimize.probeTolerance,
+  );
 
-  // ── Auto-detect low-color content for global palette ──
-  // Always use imagequant for the probe — it adaptively sizes palettes,
-  // so low-color content produces < 64 entries. NeuQuant always makes
-  // 256 entries regardless of content complexity.
+  // ── Palette strategy ──
+  // Global palette when user requested it or when probe detects
+  // low color complexity (256 entries cover all colors easily).
+  const useGlobalPalette =
+    opts.palette === "global" ||
+    (probe.colorComplexity < 1000 && opts.palette !== "local");
+
   let globalPalette: Uint8Array | null = null;
-  if (frames.length > 1) {
-    // Probe with fixed high-quality settings so the color count reflects
-    // content complexity, not encoding aggressiveness. The actual global
-    // palette is then generated at the preset's quality level.
-    try {
-      const probeResult = await quantizeImagequant(
-        frames[0].data, width, height,
-        { quality: 80, speed: 3, maxColors: 256 },
-      );
-      if (probeResult && countUsedColors(probeResult.indexed) < 64) {
+
+  if (useGlobalPalette) {
+    if (opts.quantizer === "imagequant") {
+      try {
         const step = Math.max(1, Math.floor(frames.length / 10));
         const parts: Uint8ClampedArray[] = [];
         for (let i = 0; i < frames.length; i += step) parts.push(frames[i].data);
@@ -401,26 +410,30 @@ async function encodeSubframePipeline(
         const pooled = new Uint8ClampedArray(poolSize);
         let off = 0;
         for (const p of parts) { pooled.set(p, off); off += p.length; }
-        // Generate the actual palette at preset quality
-        const iqQuality = opts.quantizer === "imagequant"
-          ? opts.quantizerQuality : 80;
-        const iqSpeed = opts.quantizer === "imagequant"
-          ? opts.quantizerSpeed : 3;
         const poolResult = await quantizeImagequant(
           pooled, width, (poolSize / 4) / width,
-          { quality: iqQuality, speed: iqSpeed, maxColors: 256 },
+          { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
         );
         if (poolResult) {
-          const poolUsed = countUsedColors(poolResult.indexed);
-          if (poolUsed < 64) {
-            globalPalette = trimPalette(poolResult.palette, poolResult.indexed).palette;
-          }
+          globalPalette = trimPalette(poolResult.palette, poolResult.indexed).palette;
         }
+      } catch {
+        // imagequant unavailable
       }
-    } catch {
-      // imagequant unavailable — skip auto-global detection
+    } else {
+      globalPalette = neuquant(frames[0].data, opts.quantizerQuality);
     }
   }
+
+  // For neuquant non-global, generate palettes upfront
+  let neuquantPalettes: Uint8Array[] | null = null;
+  if (opts.quantizer === "neuquant" && !globalPalette) {
+    neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
+  }
+
+  // ── Pass 2: Encode with probe data ──
+
+  const staleThreshold = opts.optimize.staleThreshold;
 
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
@@ -430,7 +443,9 @@ async function encodeSubframePipeline(
       let indexed: Uint8Array, palette: Uint8Array;
       if (globalPalette) {
         palette = globalPalette;
-        indexed = floydSteinberg(frames[0].data, width, height, palette, opts.ditherSerpentine);
+        indexed = opts.dither === "floyd-steinberg"
+          ? floydSteinberg(frames[0].data, width, height, palette, opts.ditherSerpentine)
+          : mapNearest(frames[0].data, palette);
       } else {
         ({ indexed, palette } = await quantizeFrame(
           frames[0].data, width, height, opts, neuquantPalettes?.[0],
@@ -448,15 +463,14 @@ async function encodeSubframePipeline(
       continue;
     }
 
-    // ── Frames 1+: sub-frame encoding ──
+    // ── Frames 1+: probe-driven sub-frame encoding ──
 
     const curr = frames[i].data;
     const prev = frames[i - 1].data;
 
-    // Include pixels where source changed OR canvas is stale
     const bbox = findChangedBbox(
-      curr, prev, canvasRgba, width, height,
-      opts.optimize.cropTolerance, opts.optimize.holeTolerance,
+      curr, prev, canvasRgba, probe.staticMask,
+      width, height, staleThreshold,
     );
     if (!bbox) {
       gifFrames[i] = {
@@ -470,30 +484,52 @@ async function encodeSubframePipeline(
 
     const cw = bbox.maxX - bbox.minX + 1;
     const ch = bbox.maxY - bbox.minY + 1;
-    const cropped = cropRgba(curr, width, bbox.minX, bbox.minY, cw, ch);
 
-    // Quantize the crop (or dither with global palette)
     let indexed: Uint8Array, palette: Uint8Array;
+
     if (globalPalette) {
       palette = globalPalette;
-      indexed = floydSteinberg(cropped, cw, ch, palette, opts.ditherSerpentine);
+      const fullIndexed = opts.dither === "floyd-steinberg"
+        ? floydSteinberg(curr, width, height, palette, opts.ditherSerpentine)
+        : mapNearest(curr, palette);
+      indexed = new Uint8Array(cw * ch);
+      for (let y = 0; y < ch; y++) {
+        const srcOff = (bbox.minY + y) * width + bbox.minX;
+        indexed.set(fullIndexed.subarray(srcOff, srcOff + cw), y * cw);
+      }
     } else {
-      ({ indexed, palette } = await quantizeFrame(
-        cropped, cw, ch, opts, neuquantPalettes?.[i],
-      ));
+      const cropped = cropRgba(curr, width, bbox.minX, bbox.minY, cw, ch);
+      if (opts.quantizer === "imagequant") {
+        const iqResult = await quantizeImagequant(cropped, cw, ch, {
+          quality: opts.quantizerQuality,
+          speed: opts.quantizerSpeed,
+          maxColors: opts.maxColors,
+        });
+        if (iqResult) {
+          palette = iqResult.palette;
+          indexed = opts.dither === false
+            ? mapNearest(cropped, palette)
+            : iqResult.indexed;
+        } else {
+          palette = neuquant(cropped, 1);
+          indexed = opts.dither === "floyd-steinberg"
+            ? floydSteinberg(cropped, cw, ch, palette, opts.ditherSerpentine)
+            : mapNearest(cropped, palette);
+        }
+      } else {
+        palette = neuquantPalettes?.[i] ?? neuquant(cropped, opts.quantizerQuality);
+        indexed = opts.dither === "floyd-steinberg"
+          ? floydSteinberg(cropped, cw, ch, palette, opts.ditherSerpentine)
+          : mapNearest(cropped, palette);
+      }
     }
 
-    // Build optimized sub-frame (punch holes vs canvas + transeq + tight crop)
     const sub = buildSubframe(
-      indexed, palette, curr, canvasRgba,
+      indexed, palette, curr, prev, canvasRgba, probe.staticMask,
       bbox.minX, bbox.minY, cw, ch, width,
-      opts.optimize.holeTolerance,
-      opts.optimize.transparencyEqualization,
-      opts.optimize.staleThreshold,
-      opts.optimize.transeqNeighborThreshold,
+      staleThreshold,
     );
 
-    // Trim unused palette entries
     let framePal = palette;
     let framePx = sub.indexedPixels;
     let frameTIdx = sub.transparentIndex;
@@ -516,8 +552,6 @@ async function encodeSubframePipeline(
       disposal: 0,
     };
 
-    // Composite onto canvas using the ORIGINAL (untrimmed) palette
-    // since canvas tracks actual decoded RGB values
     compositeOntoCanvas(canvasRgba, sub, palette, width);
   }
 
@@ -539,13 +573,18 @@ async function quantizeFrame(
         maxColors: opts.maxColors,
       });
       if (result) {
-        return { indexed: result.indexed, palette: result.palette };
+        const indexed = opts.dither === false
+          ? mapNearest(rgba, result.palette)
+          : result.indexed;
+        return { indexed, palette: result.palette };
       }
     } catch {
       // imagequant can fail on very small crops — fall through to NeuQuant
     }
     const pal = neuquant(rgba, 1);
-    const idx = floydSteinberg(rgba, w, h, pal, opts.ditherSerpentine);
+    const idx = opts.dither === "floyd-steinberg"
+      ? floydSteinberg(rgba, w, h, pal, opts.ditherSerpentine)
+      : mapNearest(rgba, pal);
     return { indexed: idx, palette: pal };
   }
 

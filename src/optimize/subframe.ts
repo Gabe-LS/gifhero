@@ -1,15 +1,9 @@
 /**
- * Sub-frame encoding: crop → quantize → punch holes → equalize.
+ * Sub-frame encoding with probe-driven transparency.
  *
- * Instead of quantizing full frames then diffing, this approach
- * crops the source to the changed region first, quantizes only
- * that region, then punches transparent holes for unchanged
- * pixels. This avoids disrupting imagequant's dithering coherence.
- *
- * Hole punching compares the source frame against the decoded
- * canvas (what the GIF decoder is actually displaying), not the
- * previous source frame. This prevents ghost trails from stale
- * dithering artifacts in earlier frames.
+ * Uses a pre-computed static mask to make definitive transparency
+ * decisions. Static pixels are unconditionally transparent. Non-static
+ * pixels use source-vs-prev and source-vs-canvas checks.
  *
  * @module
  */
@@ -26,14 +20,6 @@ export interface SubframeResult {
 
 /**
  * Crop an RGBA buffer to a rectangular region.
- *
- * @param src - Full-frame RGBA data
- * @param srcW - Full-frame width
- * @param left - Left edge of crop
- * @param top - Top edge of crop
- * @param cw - Crop width
- * @param ch - Crop height
- * @returns Cropped RGBA data
  */
 export function cropRgba(
   src: Uint8ClampedArray,
@@ -54,38 +40,37 @@ export function cropRgba(
 /**
  * Find the bounding box of pixels that need re-encoding.
  *
- * A pixel is "changed" if the source differs from the decoded
- * canvas by more than holeTolerance. This single comparison
- * catches both scene changes and stale canvas pixels.
- *
- * @param curr - Current source frame RGBA
- * @param prev - Previous source frame RGBA (unused, kept for API compat)
- * @param canvas - Decoded canvas RGBA (what the decoder shows)
- * @param w - Frame width
- * @param h - Frame height
- * @param _cropTolerance - Unused (canvas comparison subsumes this)
- * @param holeTolerance - Source-vs-canvas staleness threshold
- * @returns Bounding box, or null if no pixels changed
+ * Skips static-mask pixels entirely. A non-static pixel needs
+ * re-encoding if the source changed from the previous frame OR
+ * the canvas is stale (source differs from decoded canvas).
  */
 export function findChangedBbox(
   curr: Uint8ClampedArray,
   prev: Uint8ClampedArray,
   canvas: Uint8ClampedArray,
+  staticMask: Uint8Array,
   w: number,
   h: number,
-  _cropTolerance: number,
-  holeTolerance: number,
+  staleThreshold: number,
 ): { minX: number; maxX: number; minY: number; maxY: number } | null {
   let minX = w, maxX = -1, minY = h, maxY = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const si = (y * w + x) * 4;
+      const pi = y * w + x;
+      if (staticMask[pi]) continue;
+
+      const si = pi * 4;
+      const srcDiff = Math.max(
+        Math.abs(curr[si] - prev[si]),
+        Math.abs(curr[si + 1] - prev[si + 1]),
+        Math.abs(curr[si + 2] - prev[si + 2]),
+      );
       const canvasDiff = Math.max(
         Math.abs(curr[si] - canvas[si]),
         Math.abs(curr[si + 1] - canvas[si + 1]),
         Math.abs(curr[si + 2] - canvas[si + 2]),
       );
-      if (canvasDiff > holeTolerance) {
+      if (srcDiff > 2 || canvasDiff > staleThreshold) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -97,76 +82,59 @@ export function findChangedBbox(
 }
 
 /**
- * Build an optimized sub-frame from quantized crop data.
+ * Build an optimized sub-frame using probe-driven transparency.
  *
- * Compares the source frame against the decoded canvas (what the
- * GIF decoder is actually displaying) rather than the previous
- * source frame. This ensures stale dithering artifacts from
- * earlier frames are always detected and re-encoded.
- *
- * @param indexedPixels - Quantized indices for the crop region
- * @param palette - Flat RGB palette for this frame
- * @param currRgba - Current source frame's full RGBA data
- * @param canvasRgba - Decoded canvas RGBA (what the decoder shows)
- * @param cropLeft - Crop region left in full-frame coords
- * @param cropTop - Crop region top in full-frame coords
- * @param cw - Crop width
- * @param ch - Crop height
- * @param fullW - Full-frame width
- * @param holeTolerance - Max per-channel diff to consider "unchanged" (0 = exact match)
- * @param enableTranseq - Enable transparency run equalization
- * @returns Optimized sub-frame with position and transparency info
+ * Three-tier pixel classification:
+ *   1. Static mask → unconditionally transparent
+ *   2. Source changed this frame (srcDiff > 2) → opaque
+ *   3. Source didn't change, canvas close enough → transparent;
+ *      canvas stale → opaque
  */
 export function buildSubframe(
   indexedPixels: Uint8Array,
   palette: Uint8Array,
   currRgba: Uint8ClampedArray,
+  prevRgba: Uint8ClampedArray,
   canvasRgba: Uint8ClampedArray,
+  staticMask: Uint8Array,
   cropLeft: number,
   cropTop: number,
   cw: number,
   ch: number,
   fullW: number,
-  holeTolerance: number,
-  enableTranseq: boolean,
-  staleThreshold: number = 3,
-  transeqNeighborThreshold: number = 6,
+  staleThreshold: number,
 ): SubframeResult {
   const pixelCount = cw * ch;
   const numColors = (palette.length / 3) | 0;
 
-  // ── Mark changed pixels (source vs decoded canvas) ──
   const changed = new Uint8Array(pixelCount);
   for (let y = 0; y < ch; y++) {
     for (let x = 0; x < cw; x++) {
       const pi = y * cw + x;
-      const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
-      const d = Math.max(
+      const fi = (cropTop + y) * fullW + (cropLeft + x);
+      const si = fi * 4;
+
+      if (staticMask[fi]) continue;
+
+      const srcDiff = Math.max(
+        Math.abs(currRgba[si] - prevRgba[si]),
+        Math.abs(currRgba[si + 1] - prevRgba[si + 1]),
+        Math.abs(currRgba[si + 2] - prevRgba[si + 2]),
+      );
+      if (srcDiff > 2) {
+        changed[pi] = 1;
+        continue;
+      }
+
+      const canvasDiff = Math.max(
         Math.abs(currRgba[si] - canvasRgba[si]),
         Math.abs(currRgba[si + 1] - canvasRgba[si + 1]),
         Math.abs(currRgba[si + 2] - canvasRgba[si + 2]),
       );
-      if (d > holeTolerance) changed[pi] = 1;
-    }
-  }
-
-  // ── Morphological noise gate (5×5, density < 6 → remove) ──
-  const neighborCount = new Uint8Array(pixelCount);
-  for (let y = 0; y < ch; y++) {
-    for (let x = 0; x < cw; x++) {
-      if (!changed[y * cw + x]) continue;
-      let count = 0;
-      for (let dy = Math.max(0, y - 2); dy <= Math.min(ch - 1, y + 2); dy++) {
-        for (let dx = Math.max(0, x - 2); dx <= Math.min(cw - 1, x + 2); dx++) {
-          if (dy === y && dx === x) continue;
-          if (changed[dy * cw + dx]) count++;
-        }
+      if (canvasDiff > staleThreshold) {
+        changed[pi] = 1;
       }
-      neighborCount[y * cw + x] = count;
     }
-  }
-  for (let i = 0; i < pixelCount; i++) {
-    if (changed[i] && neighborCount[i] < 6) changed[i] = 0;
   }
 
   // ── Find transparent index ──
@@ -184,9 +152,7 @@ export function buildSubframe(
     if (!usedByChanged[i]) { tIdx = i; break; }
   }
 
-  // If all palette entries are used by changed pixels, evict the
-  // least-used entry: reassign its opaque pixels to their nearest
-  // alternative color, freeing the slot for transparency.
+  // Evict the least-used entry if no free slot exists
   let pixels = indexedPixels;
   if (tIdx < 0) {
     const changedCount = new Uint32Array(256);
@@ -231,70 +197,10 @@ export function buildSubframe(
     };
   }
 
-  // ── Punch holes ──
+  // ── Set transparent pixels ──
   const punched = new Uint8Array(pixelCount);
   for (let i = 0; i < pixelCount; i++) {
     punched[i] = changed[i] ? pixels[i] : tIdx;
-  }
-
-  // ── Stale transparency check ──
-  // For each transparent pixel, verify that the canvas color is close
-  // to what the current palette would render. If the nearest palette
-  // color for the source pixel diverges from the canvas beyond the
-  // threshold, the canvas is showing stale data — flip opaque.
-  for (let y = 0; y < ch; y++) {
-    for (let x = 0; x < cw; x++) {
-      const i = y * cw + x;
-      if (punched[i] !== tIdx) continue;
-      const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
-      const sr = currRgba[si], sg = currRgba[si + 1], sb = currRgba[si + 2];
-      const cr = canvasRgba[si], cg = canvasRgba[si + 1], cb = canvasRgba[si + 2];
-
-      let bestIdx = 0, bestDist = 0x7fffffff;
-      for (let p = 0; p < numColors; p++) {
-        const po = p * 3;
-        const d = Math.abs(sr - palette[po]) + Math.abs(sg - palette[po + 1]) + Math.abs(sb - palette[po + 2]);
-        if (d < bestDist) { bestDist = d; bestIdx = p; }
-      }
-
-      const po = bestIdx * 3;
-      const palCanvasDiff = Math.max(
-        Math.abs(palette[po] - cr),
-        Math.abs(palette[po + 1] - cg),
-        Math.abs(palette[po + 2] - cb),
-      );
-      if (palCanvasDiff > staleThreshold) {
-        punched[i] = bestIdx;
-        usedByChanged[bestIdx] = 1;
-      }
-    }
-  }
-
-  // ── Transparency run equalization ──
-  // Isolated opaque pixels surrounded by transparency are flipped
-  // transparent if the palette's nearest color is close to the canvas.
-  if (enableTranseq) {
-    for (let y = 0; y < ch; y++) {
-      for (let x = 0; x < cw; x++) {
-        const i = y * cw + x;
-        if (punched[i] === tIdx) continue;
-        let tNeighbors = 0;
-        for (let dy = Math.max(0, y - 1); dy <= Math.min(ch - 1, y + 1); dy++) {
-          for (let dx = Math.max(0, x - 1); dx <= Math.min(cw - 1, x + 1); dx++) {
-            if (dy === y && dx === x) continue;
-            if (punched[dy * cw + dx] === tIdx) tNeighbors++;
-          }
-        }
-        if (tNeighbors < transeqNeighborThreshold) continue;
-        const si = ((cropTop + y) * fullW + (cropLeft + x)) * 4;
-        const d = Math.max(
-          Math.abs(currRgba[si] - canvasRgba[si]),
-          Math.abs(currRgba[si + 1] - canvasRgba[si + 1]),
-          Math.abs(currRgba[si + 2] - canvasRgba[si + 2]),
-        );
-        if (d <= staleThreshold) punched[i] = tIdx;
-      }
-    }
   }
 
   // ── Final tight crop ──
@@ -342,14 +248,6 @@ export function buildSubframe(
 
 /**
  * Composite a sub-frame onto the decoded canvas.
- *
- * Opaque pixels overwrite the canvas with their palette color.
- * Transparent pixels leave the canvas unchanged.
- *
- * @param canvas - Full-frame RGBA canvas (mutated in place)
- * @param sub - The sub-frame result
- * @param palette - Flat RGB palette for the sub-frame
- * @param fullW - Full-frame width
  */
 export function compositeOntoCanvas(
   canvas: Uint8ClampedArray,
@@ -374,12 +272,6 @@ export function compositeOntoCanvas(
 
 /**
  * Decode a full-frame indexed image onto the canvas.
- *
- * @param canvas - Full-frame RGBA canvas (mutated in place)
- * @param indexed - Indexed pixel data
- * @param palette - Flat RGB palette
- * @param w - Frame width
- * @param h - Frame height
  */
 export function decodeFrameToCanvas(
   canvas: Uint8ClampedArray,
@@ -400,11 +292,6 @@ export function decodeFrameToCanvas(
 
 /**
  * Remove unused palette entries and remap indices.
- *
- * @param palette - Flat RGB palette
- * @param indexed - Pixel indices
- * @param transparentIndex - Transparent index to preserve (or undefined)
- * @returns Trimmed palette, remapped indices, updated transparent index
  */
 export function trimPalette(
   palette: Uint8Array,

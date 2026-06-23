@@ -87,6 +87,29 @@ function extractPalette(png: Uint8Array): Uint8Array {
   );
 }
 
+/**
+ * Find the first fully-transparent palette entry from the tRNS chunk.
+ *
+ * @param png - Raw PNG file bytes
+ * @returns Index of the first alpha=0 entry, or -1 if none
+ */
+function extractTransparentIndex(png: Uint8Array): number {
+  let pos = 8;
+  while (pos < png.length) {
+    const len = readU32(png, pos);
+    const type = readChunkType(png, pos + 4);
+    if (type === "tRNS") {
+      const data = png.subarray(pos + 8, pos + 8 + len);
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] === 0) return i;
+      }
+      return -1;
+    }
+    pos += 12 + len;
+  }
+  return -1;
+}
+
 // ── PNG scanline filters ────────────────────────────────────────
 
 /**
@@ -253,7 +276,7 @@ export async function quantizeImagequant(
   width: number,
   height: number,
   options?: Partial<ImagequantOptions>,
-): Promise<{ palette: Uint8Array; indexed: Uint8Array } | null> {
+): Promise<{ palette: Uint8Array; indexed: Uint8Array; transparentIndex: number } | null> {
   let bg;
   try {
     bg = await initWasm();
@@ -280,6 +303,7 @@ export async function quantizeImagequant(
 
   const palette = extractPalette(pngData);
   const indexed = extractIndexed(pngData, width, height);
+  const transparentIndex = extractTransparentIndex(pngData);
 
-  return { palette, indexed };
+  return { palette, indexed, transparentIndex };
 }
