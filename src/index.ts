@@ -467,16 +467,18 @@ async function encodeSubframePipeline(
     : complexity > 1000 ? 5
     : 2;
 
+  const sceneChangeSet = new Set(probe.sceneChanges);
+
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
 
-    // ── Frame 0 ──
-    if (i === 0) {
+    // ── Frame 0 or scene change: full-frame quantize, reset canvas ──
+    if (i === 0 || sceneChangeSet.has(i)) {
       let indexed: Uint8Array, palette: Uint8Array;
 
       if (useGifQuant) {
         const r = gifQuantSimple(
-          frames[0].data, width, height,
+          frames[i].data, width, height,
           opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
         );
         palette = rgbaToRgbPalette(r.palette, r.paletteCount);
@@ -484,11 +486,11 @@ async function encodeSubframePipeline(
       } else if (globalPalette) {
         palette = globalPalette;
         indexed = opts.dither === "floyd-steinberg"
-          ? floydSteinberg(frames[0].data, width, height, palette, opts.ditherSerpentine)
-          : mapNearest(frames[0].data, palette);
+          ? floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine)
+          : mapNearest(frames[i].data, palette);
       } else {
         ({ indexed, palette } = await quantizeFrame(
-          frames[0].data, width, height, opts, neuquantPalettes?.[0],
+          frames[i].data, width, height, opts, neuquantPalettes?.[i],
         ));
       }
 
@@ -496,7 +498,7 @@ async function encodeSubframePipeline(
       indexed = trimmed.indexed;
       palette = trimmed.palette;
 
-      gifFrames[0] = {
+      gifFrames[i] = {
         indexedPixels: indexed, palette, width, height,
         delay, disposal: 0,
       };

@@ -116,11 +116,18 @@ export function probeFrames(
     }
   }
 
-  // ── Scene changes ──
+  // ── Scene changes + keyframes ──
+  // A keyframe is needed at scene changes (>60% pixels change) and
+  // at motion-to-static transitions (high-motion frame followed by
+  // low-motion frames — the canvas carries stale quantization error).
 
   const sceneChanges: number[] = [];
   for (let f = 1; f < frames.length; f++) {
-    if (perFrameMotion[f] > 0.6) sceneChanges.push(f);
+    if (perFrameMotion[f] > 0.6) {
+      sceneChanges.push(f);
+    } else if (f >= 2 && perFrameMotion[f] < 0.02 && perFrameMotion[f - 1] > 0.15) {
+      sceneChanges.push(f);
+    }
   }
 
   return {
