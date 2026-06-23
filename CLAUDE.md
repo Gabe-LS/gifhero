@@ -52,8 +52,9 @@ Source frames
       autoThreshold = clamp(3, 10, round(3 + 7 × min(1, complexity / 5000)))
       threshold = max(motionFloor, autoThreshold)
   → Content-adaptive lossyLzw:
-      adaptiveLzw = clamp(preset, 6, round(preset + 2 × min(1, complexity / 3000)))
-  → Shared palette via Histogram (if any downscaling, ratio > 1.0)
+      adaptiveLzw = clamp(preset, 5, round(preset + complexity / 3000))
+  → Adaptive maxColors: 192 when colorComplexity ≥ 20000, else 256
+  → Shared palette via Histogram (if downscaling OR colorComplexity ≥ 8000)
   → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
   → Frames 1+:
       1. Zero alpha on static-mask pixels
@@ -157,15 +158,15 @@ test/bench/
 Best visual quality. Background-aware imagequant at maximum precision.
 - quantizer: imagequant (q90, speed 1)
 - dither: floyd-steinberg (serpentine)
-- lossyLzw: 4 (adaptive up to 6)
-- optimize: subframe, content-adaptive staleThreshold, keyframe detection
+- lossyLzw: 4 (adaptive up to 5)
+- optimize: subframe, content-adaptive staleThreshold, keyframe detection, adaptive maxColors
 
 ### balanced
 Good quality with smaller files.
 - quantizer: imagequant (q80, speed 3)
 - dither: floyd-steinberg (serpentine)
-- lossyLzw: 4 (adaptive up to 6)
-- optimize: subframe, content-adaptive staleThreshold, keyframe detection
+- lossyLzw: 4 (adaptive up to 5)
+- optimize: subframe, content-adaptive staleThreshold, keyframe detection, adaptive maxColors
 
 ### speed
 Fastest encoding. Uses NeuQuant instead of imagequant WASM.
@@ -222,12 +223,15 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 
 | Resolution | VMAF wins | Size wins | Avg VMAF Δ |
 |-----------|-----------|-----------|------------|
-| **480p** | **15/25** | **19/25** | **+0.7** |
-| **360p** | **15/25** | **22/25** | **+0.7** |
-| **240p** | **18/25** | **25/25** | **+1.7** |
-| **160p** | **19/25** | **24/25** | **+2.4** |
+| **480p** | **12/25** | **22/25** | **+0.5** |
+| **360p** | **12/25** | **23/25** | **+0.7** |
+| **240p** | **16/25** | **25/25** | **+1.6** |
+| **160p** | **20/25** | **24/25** | **+2.5** |
 
 **Zero cases >10% larger than gifski. Zero VMAF losses >2 points.**
 
 ## Current Phase
-Phase 5 complete. Content-adaptive staleThreshold and lossyLzw from probe motion × color complexity. Shared palette via Histogram for all downscaled encodes. Eliminated all >10% size regressions vs gifski across 200 encodes while maintaining VMAF advantage at every resolution.
+Phase 6 complete. Three content-adaptive optimizations reduce file size without relying on aggressive lossy LZW:
+1. Conditional shared palette (colorComplexity ≥ 8000 at native res, always when downscaling) for cross-frame LZW consistency
+2. Adaptive maxColors (192 when colorComplexity ≥ 20000) to reduce dithering noise on high-diversity content
+3. Adaptive lossyLzw capped at 5 (not 6) from probe motion × color complexity

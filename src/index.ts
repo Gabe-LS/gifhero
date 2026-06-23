@@ -393,12 +393,10 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   if (opts.optimize.subframe && frames.length > 1) {
     const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio);
 
-    // Adaptive lossyLzw from the full probe data: scale from the
-    // preset value up to 8 based on motion × color complexity.
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
     const adaptiveLzw = options.lossyLzw !== undefined
       ? opts.lossyLzw
-      : Math.min(6, Math.max(opts.lossyLzw, Math.round(opts.lossyLzw + 2 * Math.min(1, lzwComplexity / 3000))));
+      : Math.min(5, Math.max(opts.lossyLzw, Math.round(opts.lossyLzw + lzwComplexity / 3000)));
 
     return writeGif(gifFrames, {
       width, height, loop: opts.loop,
@@ -454,19 +452,28 @@ async function encodeSubframePipeline(
   }
 
   // ── Shared palette for consistent transparency ──
-  // Use shared palette when downscaling (per-frame palettes fragment
-  // at lower resolutions) or when user explicitly requests global.
+  // Shared palette gives cross-frame palette consistency that helps
+  // LZW compression (same pixel → same index across frames).
+  // Used when downscaling (any ratio) or at native resolution when
+  // color complexity is high enough that per-frame palettes fragment.
+  // For very high color diversity, reduce palette size — 256 entries
+  // create dithering noise that inflates LZW with negligible quality
+  // gain when the source has >20K distinct colors.
   let sharedPalette: Uint8Array | null = null;
-  if (useGifQuant && (
+  const adaptiveMaxColors = probe.colorComplexity >= 20000
+    ? Math.min(opts.maxColors, 192)
+    : opts.maxColors;
+  if (useGifQuant && opts.palette !== "local" && (
+    downscaleRatio > 1.0 ||
     opts.palette === "global" ||
-    downscaleRatio > 1.0
+    probe.colorComplexity >= 8000
   )) {
     const step = Math.max(1, Math.floor(frames.length / 10));
     const sampled: Uint8ClampedArray[] = [];
     for (let f = 0; f < frames.length; f += step) sampled.push(frames[f].data);
     sharedPalette = gifBuildPalette(
       sampled, width, height,
-      opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, opts.maxColors - 1),
+      opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
     );
   }
 
@@ -544,7 +551,7 @@ async function encodeSubframePipeline(
       if (useGifQuant) {
         const r = gifQuantSimple(
           frames[i].data, width, height,
-          opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
+          opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
         );
         palette = rgbaToRgbPalette(r.palette, r.paletteCount);
         indexed = r.indexed;
@@ -605,7 +612,7 @@ async function encodeSubframePipeline(
         : gifQuantBg(
             inputRgba, width, height,
             canvasRgba, importanceMap,
-            opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
+            opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
           );
 
       const tIdx = r.transparentIndex;
