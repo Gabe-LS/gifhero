@@ -512,15 +512,13 @@ async function encodeSubframePipeline(
   // (motion × color diversity), with a floor from motion level.
   const complexity = probe.motionLevel * probe.colorComplexity;
   const motionFloor = probe.motionLevel > 0.01 ? 5 : 3;
-  const autoThreshold = Math.min(8, Math.max(motionFloor,
-    Math.round(3 + 5 * Math.min(1, complexity / 4000)),
+  const autoThreshold = Math.min(10, Math.max(motionFloor,
+    Math.round(3 + 7 * Math.min(1, complexity / 5000)),
   ));
-  // Scale threshold only for ≥2× downscale where Lanczos3 smoothing
-  // meaningfully reduces inter-frame diffs. Mild downscale (360p) has
-  // nearly identical dithering behavior to native resolution.
-  const scaledThreshold = downscaleRatio >= 2
-    ? Math.max(1, Math.round(autoThreshold / Math.sqrt(downscaleRatio)))
-    : autoThreshold;
+  // Don't scale threshold — the shared palette (active at ≥2×
+  // downscale) handles transparency natively, so the threshold is
+  // just an alpha-zeroing hint, not the final transparency decision.
+  const scaledThreshold = autoThreshold;
   // Let user override via staleThreshold (detected by differing from preset default of 8)
   const staleThreshold = opts.optimize.staleThreshold !== 8
     ? opts.optimize.staleThreshold
