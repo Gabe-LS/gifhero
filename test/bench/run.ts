@@ -829,86 +829,179 @@ async function main() {
   // Run benchmarks
   const allResults: EncoderResult[] = [];
 
-  // Separate gifhero encoders from external ones
-  const gifheroEncoders = available.filter((n) => n === "gifhero");
+  const hasGifhero = available.includes("gifhero");
   const externalEncoders = available.filter((n) => n !== "gifhero");
 
-  async function benchFixtureParallel(fixture: string) {
-    const framesDir = join(FIXTURES_DIR, fixture);
-    const results: EncoderResult[] = [];
-    const frameCount = countFrames(framesDir);
+  if (PARALLEL_MODE) {
+    console.log(`  Phase 1: Encoding all fixtures (worker threads for gifhero)...`);
 
-    // 1. Encode gifhero presets via worker threads (true parallelism)
-    if (gifheroEncoders.length > 0) {
-      const { width, height, frames } = loadPngFrames(framesDir);
-      const jobs: EncodeJob[] = gifheroEncoders.map(() => ({
-        frames: frames.map((f) => ({ data: f.data, delay: f.delay })),
-        width,
-        height,
+    const gifsDir = join(TEMP_DIR, "gifs");
+    mkdirSync(gifsDir, { recursive: true });
+
+    // 1a. Encode all gifhero fixtures via worker threads (16 concurrent)
+    if (hasGifhero) {
+      const gifheroJobs: Array<{ fixture: string; framesDir: string }> = [];
+      const loadedFrames: Array<{ width: number; height: number; frames: Array<{ data: Uint8ClampedArray; delay: number }> }> = [];
+
+      for (const fixture of fixtures) {
+        const framesDir = join(FIXTURES_DIR, fixture);
+        const loaded = loadPngFrames(framesDir);
+        gifheroJobs.push({ fixture, framesDir });
+        loadedFrames.push(loaded);
+      }
+
+      const jobs: EncodeJob[] = loadedFrames.map((l) => ({
+        frames: l.frames.map((f) => ({ data: f.data, delay: f.delay })),
+        width: l.width,
+        height: l.height,
         options: { preset: "quality" as const },
       }));
 
-      const gifs = await encodeParallel(jobs, gifheroEncoders.length);
+      const gifs = await encodeParallel(jobs, 16, (done, total) => {
+        process.stdout.write(`\r    gifhero: ${done}/${total} fixtures encoded`);
+      });
+      console.log("");
 
-      for (let j = 0; j < gifheroEncoders.length; j++) {
-        const encoderName = gifheroEncoders[j];
-        const gifsDir = join(TEMP_DIR, "gifs");
-        mkdirSync(gifsDir, { recursive: true });
-        const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
+      for (let j = 0; j < fixtures.length; j++) {
+        const outputPath = join(gifsDir, `${fixtures[j]}-gifhero.gif`);
         writeFileSync(outputPath, gifs[j]);
-
-        const result = await measureEncoder(
-          encoderName, fixture, framesDir, outputPath,
-          gifs[j].length, 0, frameCount, vmafOk, runDssim,
-        );
-        if (result) results.push(result);
       }
     }
 
-    // 2. External encoders (gifski, ffmpeg) — they fork processes natively
-    for (const encoderName of externalEncoders) {
-      const result = await benchmarkEncoder(
-        encoderName, encoders[encoderName].encode,
-        fixture, framesDir, vmafOk, runDssim,
-      );
-      if (result) results.push(result);
-    }
-
-    return results;
-  }
-
-  async function benchFixtureSequential(fixture: string) {
-    const framesDir = join(FIXTURES_DIR, fixture);
-    console.log(`  Benchmarking: ${fixture} (${countFrames(framesDir)} frames)`);
-    const results: EncoderResult[] = [];
-
-    for (const encoderName of available) {
-      process.stdout.write(`    ${encoderName}...`);
-      const result = await benchmarkEncoder(
-        encoderName,
-        encoders[encoderName].encode,
-        fixture,
-        framesDir,
-        vmafOk,
-        runDssim
-      );
-      if (result) {
-        results.push(result);
-        console.log(oneLiner(result, vmafOk));
+    // 1b. Encode all external encoders sequentially per fixture
+    // (they fork child processes so they're already CPU-parallel)
+    for (const fixture of fixtures) {
+      const framesDir = join(FIXTURES_DIR, fixture);
+      for (const encoderName of externalEncoders) {
+        const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
+        try {
+          await encoders[encoderName].encode(framesDir, outputPath, countFrames(framesDir));
+        } catch {}
+        process.stdout.write(`\r    external: ${fixture}/${encoderName}     `);
       }
     }
-    return results;
-  }
+    console.log("");
 
-  if (PARALLEL_MODE) {
-    console.log(`  Running ${fixtures.length} fixtures in parallel (worker threads for gifhero)...`);
-    const batches = await Promise.all(fixtures.map((f) => benchFixtureParallel(f)));
-    for (const batch of batches) allResults.push(...batch);
+    // 2. Measure all metrics — VMAF in parallel batches via shell
+    console.log(`  Phase 2: Measuring metrics...`);
+
+    const allGifs: Array<{ fixture: string; encoder: string; gifPath: string; framesDir: string }> = [];
+    for (const fixture of fixtures) {
+      const framesDir = join(FIXTURES_DIR, fixture);
+      for (const encoderName of available) {
+        const gifPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
+        if (existsSync(gifPath)) {
+          allGifs.push({ fixture, encoder: encoderName, gifPath, framesDir });
+        }
+      }
+    }
+
+    // VMAF in batches of 8 concurrent ffmpeg processes
+    const logsDir = join(TEMP_DIR, "logs");
+    mkdirSync(logsDir, { recursive: true });
+
+    if (vmafOk) {
+      for (let batch = 0; batch < allGifs.length; batch += 8) {
+        const slice = allGifs.slice(batch, batch + 8);
+        const cmds = slice.map((g) => {
+          const fc = countFrames(g.framesDir);
+          if (fc < 2) return "true";
+          const first = new Image();
+          first.src = readFileSync(join(g.framesDir, readdirSync(g.framesDir).filter(f => f.endsWith(".png")).sort()[0]));
+          const w = first.width, h = first.height;
+          const logPath = join(logsDir, `${g.fixture}-${g.encoder}-vmaf.json`);
+          return `ffmpeg -y -framerate 20 -i "${g.framesDir}/%04d.png" -i "${g.gifPath}" ` +
+            `-filter_complex "[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
+            `[0:v]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
+            `[r1][d1]libvmaf=log_path=${logPath}:log_fmt=json:feature=name=ciede;` +
+            `[r2][d2]ssim;[r3][d3]psnr" -f null - 2>/dev/null &`;
+        });
+        try {
+          execSync(cmds.join("\n") + "\nwait", { shell: "/bin/bash", timeout: 600000, stdio: "ignore" });
+        } catch {}
+        process.stdout.write(`\r    VMAF: ${Math.min(batch + 8, allGifs.length)}/${allGifs.length}`);
+      }
+      console.log("");
+    }
+
+    // 3. Collect all results
+    for (const g of allGifs) {
+      const fileSize = statSync(g.gifPath).size;
+      const frameCount = countFrames(g.framesDir);
+
+      let vmafMean: number | null = null;
+      let vmafMin: number | null = null;
+      let ciede2000: number | null = null;
+      let ssimMean: number | null = null;
+      let psnrMean: number | null = null;
+      const logPath = join(logsDir, `${g.fixture}-${g.encoder}-vmaf.json`);
+      if (existsSync(logPath)) {
+        try {
+          const data = JSON.parse(readFileSync(logPath, "utf-8"));
+          vmafMean = data.pooled_metrics?.vmaf?.mean ?? null;
+          vmafMin = data.pooled_metrics?.vmaf?.min ?? null;
+          ciede2000 = data.pooled_metrics?.ciede2000?.mean ?? null;
+        } catch {}
+      }
+
+      // CAMBI (quick, single-GIF no-reference)
+      let cambiBanding: number | null = null;
+      if (vmafOk) {
+        const cambiLog = join(logsDir, `${g.fixture}-${g.encoder}-cambi.json`);
+        try {
+          execSync(
+            `ffmpeg -y -i "${g.gifPath}" ` +
+            `-filter_complex "[0:v]split[a][b];[a][b]libvmaf=feature=name=cambi:log_path=${cambiLog}:log_fmt=json" ` +
+            `-f null - 2>/dev/null`,
+            { timeout: 120000, stdio: "ignore" },
+          );
+          const d = JSON.parse(readFileSync(cambiLog, "utf-8"));
+          cambiBanding = d.pooled_metrics?.cambi?.mean ?? null;
+        } catch {}
+      }
+
+      // DSSIM
+      let dssimMean: number | null = null;
+      let dssimMax: number | null = null;
+      let dssimP95: number | null = null;
+      if (runDssim) {
+        const extractDir = join(TEMP_DIR, "frames", `${g.fixture}-${g.encoder}`);
+        try {
+          extractGifFrames(g.gifPath, extractDir);
+          const d = dssimFrames(g.framesDir, extractDir);
+          dssimMean = d.mean; dssimMax = d.max; dssimP95 = d.p95;
+        } catch {}
+      }
+
+      const vmafPerMB = vmafMean !== null ? vmafMean / (fileSize / (1024 * 1024)) : null;
+
+      allResults.push({
+        encoder: g.encoder, fixture: g.fixture, fileSize,
+        encodingTimeMs: 0, frameCount, gifPath: g.gifPath,
+        vmafMean, vmafMin, cambiBanding, ciede2000,
+        ssimMean, psnrMean, dssimMean, dssimMax, dssimP95,
+        flickerScore: null, vmafPerMB,
+      });
+    }
+
     console.log(`  Done — ${allResults.length} results collected.`);
+
   } else {
     for (const fixture of fixtures) {
-      const results = await benchFixtureSequential(fixture);
-      allResults.push(...results);
+      const framesDir = join(FIXTURES_DIR, fixture);
+      console.log(`  Benchmarking: ${fixture} (${countFrames(framesDir)} frames)`);
+
+      for (const encoderName of available) {
+        process.stdout.write(`    ${encoderName}...`);
+        const result = await benchmarkEncoder(
+          encoderName, encoders[encoderName].encode,
+          fixture, framesDir, vmafOk, runDssim,
+        );
+        if (result) {
+          allResults.push(result);
+          console.log(oneLiner(result, vmafOk));
+        }
+      }
     }
   }
 
