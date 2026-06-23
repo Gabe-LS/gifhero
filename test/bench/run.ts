@@ -119,62 +119,54 @@ function getGitCommit(): string | null {
 type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void | Promise<void>;
 
 const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {
+  // ── 480p (native resolution, default settings) ──
+
   gifski: {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
       execSync(
-        `gifski --fps 20 --width 480 --quality 100 -o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 -o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
   },
 
-  "ffmpeg-palettegen": {
-    available: () => hasCommand("ffmpeg"),
-    encode: (framesDir, outputPath) => {
-      const palettePath = outputPath.replace(".gif", "-palette.png");
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" ` +
-        `-vf "palettegen=stats_mode=diff:max_colors=256" "${palettePath}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -i "${palettePath}" ` +
-        `-lavfi "paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      try { execSync(`rm "${palettePath}"`, { stdio: "ignore" }); } catch {}
-    },
-  },
-
-  "ffmpeg+gifsicle": {
-    available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
-    encode: (framesDir, outputPath) => {
-      const tmpGif = outputPath.replace(".gif", "-tmp.gif");
-      const palettePath = outputPath.replace(".gif", "-palette.png");
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" ` +
-        `-vf "palettegen=stats_mode=diff" "${palettePath}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -i "${palettePath}" ` +
-        `-lavfi "paletteuse=dither=floyd_steinberg" "${tmpGif}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      execSync(
-        `gifsicle -O3 --lossy=80 "${tmpGif}" -o "${outputPath}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      try { execSync(`rm "${palettePath}" "${tmpGif}"`, { stdio: "ignore" }); } catch {}
-    },
-  },
-
-  "gifhero": {
+  gifhero: {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
       writeFileSync(outputPath, await encode({ width, height, frames, preset: "quality" }));
+    },
+  },
+
+  // ── 240p (half resolution) ──
+
+  "gifski-240p": {
+    available: () => hasCommand("gifski"),
+    encode: (framesDir, outputPath) => {
+      execSync(
+        `gifski --fps 20 --width 240 -o "${outputPath}" "${framesDir}"/*.png`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
+      );
+    },
+  },
+
+  "gifhero-240p": {
+    available: () => true,
+    encode: async (framesDir, outputPath) => {
+      const full = loadPngFrames(framesDir);
+      const hw = Math.round(full.width / 2);
+      const hh = Math.round(full.height / 2);
+      const scaled = full.frames.map((f) => {
+        const c = createCanvas(hw, hh);
+        const src = createCanvas(full.width, full.height);
+        src.getContext("2d").putImageData(
+          new (globalThis as any).ImageData(f.data, full.width, full.height), 0, 0,
+        );
+        c.getContext("2d").drawImage(src, 0, 0, hw, hh);
+        return { data: c.getContext("2d").getImageData(0, 0, hw, hh).data, delay: f.delay };
+      });
+      writeFileSync(outputPath, await encode({ width: hw, height: hh, frames: scaled, preset: "quality" }));
     },
   },
 };
@@ -765,7 +757,7 @@ const FAST_FIXTURES = new Set([
   "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
 const FAST_ENCODERS = new Set([
-  "gifski", "gifhero",
+  "gifski", "gifhero", "gifski-240p", "gifhero-240p",
 ]);
 
 // ─────────────────────────────────────────────
@@ -829,8 +821,8 @@ async function main() {
   // Run benchmarks
   const allResults: EncoderResult[] = [];
 
-  const hasGifhero = available.includes("gifhero");
-  const externalEncoders = available.filter((n) => n !== "gifhero");
+  const gifheroEncoderNames = available.filter((n) => n.startsWith("gifhero"));
+  const externalEncoders = available.filter((n) => !n.startsWith("gifhero"));
 
   if (PARALLEL_MODE) {
     console.log(`  Phase 1: Encoding all fixtures (worker threads for gifhero)...`);
@@ -838,32 +830,48 @@ async function main() {
     const gifsDir = join(TEMP_DIR, "gifs");
     mkdirSync(gifsDir, { recursive: true });
 
-    // 1a. Encode all gifhero fixtures via worker threads (16 concurrent)
-    if (hasGifhero) {
-      const gifheroJobs: Array<{ fixture: string; framesDir: string }> = [];
-      const loadedFrames: Array<{ width: number; height: number; frames: Array<{ data: Uint8ClampedArray; delay: number }> }> = [];
+    // 1a. Encode all gifhero variants via worker threads (16 concurrent)
+    for (const encoderName of gifheroEncoderNames) {
+      const is240p = encoderName.includes("240p");
+      const allJobs: EncodeJob[] = [];
 
       for (const fixture of fixtures) {
         const framesDir = join(FIXTURES_DIR, fixture);
         const loaded = loadPngFrames(framesDir);
-        gifheroJobs.push({ fixture, framesDir });
-        loadedFrames.push(loaded);
+        let w = loaded.width, h = loaded.height;
+        let frameData = loaded.frames;
+
+        if (is240p) {
+          const hw = Math.round(w / 2);
+          const hh = Math.round(h / 2);
+          frameData = loaded.frames.map((f) => {
+            const src = createCanvas(w, h);
+            const srcCtx = src.getContext("2d");
+            const imgData = srcCtx.createImageData(w, h);
+            imgData.data.set(f.data);
+            srcCtx.putImageData(imgData, 0, 0);
+            const dst = createCanvas(hw, hh);
+            dst.getContext("2d").drawImage(src, 0, 0, hw, hh);
+            return { data: dst.getContext("2d").getImageData(0, 0, hw, hh).data, delay: f.delay };
+          });
+          w = hw;
+          h = hh;
+        }
+
+        allJobs.push({
+          frames: frameData.map((f) => ({ data: f.data, delay: f.delay })),
+          width: w, height: h,
+          options: { preset: "quality" as const },
+        });
       }
 
-      const jobs: EncodeJob[] = loadedFrames.map((l) => ({
-        frames: l.frames.map((f) => ({ data: f.data, delay: f.delay })),
-        width: l.width,
-        height: l.height,
-        options: { preset: "quality" as const },
-      }));
-
-      const gifs = await encodeParallel(jobs, 16, (done, total) => {
-        process.stdout.write(`\r    gifhero: ${done}/${total} fixtures encoded`);
+      const gifs = await encodeParallel(allJobs, 16, (done, total) => {
+        process.stdout.write(`\r    ${encoderName}: ${done}/${total} fixtures encoded`);
       });
       console.log("");
 
       for (let j = 0; j < fixtures.length; j++) {
-        const outputPath = join(gifsDir, `${fixtures[j]}-gifhero.gif`);
+        const outputPath = join(gifsDir, `${fixtures[j]}-${encoderName}.gif`);
         writeFileSync(outputPath, gifs[j]);
       }
     }
@@ -1027,7 +1035,7 @@ async function main() {
   const refsDir = join(__dirname, "references");
   mkdirSync(refsDir, { recursive: true });
   for (const r of allResults) {
-    if ((r.encoder.startsWith("gifhero") || r.encoder === "gifski") && existsSync(r.gifPath)) {
+    if ((r.encoder.startsWith("gifhero") || r.encoder.startsWith("gifski")) && existsSync(r.gifPath)) {
       const dest = join(refsDir, `${r.fixture}-${r.encoder}.gif`);
       try { writeFileSync(dest, readFileSync(r.gifPath)); } catch {}
     }

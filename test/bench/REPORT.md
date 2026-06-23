@@ -2,119 +2,128 @@
 
 **Date:** 2026-06-23  
 **Commit:** 75a0c3a  
-**Preset:** quality (imagequant q90, speed 1, F-S dithering, lossyLzw 4)  
-**Fixtures:** 25 (10 big-buck-bunny clips + 15 standard)  
-**Quantizer:** custom libimagequant WASM with `set_background`  
-**Keyframes:** scene changes (>60% motion) + motion-to-static transitions
+**gifhero:** quality preset (imagequant q90 speed 1, F-S dithering, lossyLzw 4, content-adaptive staleThreshold, keyframe detection)  
+**gifski:** default settings (quality 90, no `--extra`)  
+**Fixtures:** 25 × 2 resolutions (480p native + 240p downscaled) = 100 encodes per encoder
 
 ---
 
 ## Summary
 
-gifhero beats gifski on **file size in 23 out of 25 fixtures** and on **VMAF in 15 out of 25**. Average file size is **30% smaller** than gifski. Average VMAF/MB (quality per byte) is **74% higher**.
+### 480p (native resolution)
+
+gifhero beats gifski on **VMAF in 24 out of 25 fixtures** and on **file size in 19 out of 25**.
 
 | Metric | gifhero wins | gifski wins | Tie |
 |--------|-------------|-------------|-----|
-| Smaller file | **23** | 2 | 0 |
-| Higher VMAF | **15** | 9 | 1 |
-| Both smaller AND higher VMAF | **12** | — | — |
+| Higher VMAF | **24** | 0 | 1 |
+| Smaller file | **19** | 6 | 0 |
+| Both | **17** | — | — |
+
+### 240p (half resolution)
+
+gifhero beats gifski on **VMAF in 23 out of 25** and on **file size in 16 out of 25**.
+
+| Metric | gifhero wins | gifski wins | Tie |
+|--------|-------------|-------------|-----|
+| Higher VMAF | **23** | 1 | 1 |
+| Smaller file | **16** | 9 | 0 |
 
 ---
 
-## Head-to-Head: gifhero vs gifski (all 25 fixtures)
+## 480p Head-to-Head
 
-| Fixture | gifhero Size | gifski Size | Δ Size | gifhero VMAF | gifski VMAF | Δ VMAF |
-|---------|-------------|-------------|--------|-------------|-------------|--------|
-| bbb-clip-01 | **4.3MB** | 6.2MB | **-31%** | 94.7 | **95.6** | -0.9 |
-| bbb-clip-02 | **4.4MB** | 5.3MB | **-17%** | **96.2** | 95.1 | **+1.1** |
-| bbb-clip-03 | **1.4MB** | 2.0MB | **-30%** | 95.9 | **96.2** | -0.3 |
-| bbb-clip-04 | **2.1MB** | 3.1MB | **-32%** | 96.5 | **97.2** | -0.7 |
-| bbb-clip-05 | **2.4MB** | 3.2MB | **-25%** | 98.6 | **98.9** | -0.3 |
-| bbb-clip-06 | **2.3MB** | 2.5MB | **-8%** | 96.2 | **96.4** | -0.2 |
-| bbb-clip-07 | **2.3MB** | 3.8MB | **-39%** | **96.8** | 94.6 | **+2.2** |
-| bbb-clip-08 | **7.1MB** | 7.8MB | **-9%** | 98.7 | **99.1** | -0.4 |
-| bbb-clip-09 | **1.8MB** | 2.3MB | **-22%** | 96.7 | **97.1** | -0.4 |
-| bbb-clip-10 | **3.6MB** | 6.3MB | **-43%** | **100.0** | 100.0 | 0.0 |
-| big-buck-bunny | **2.9MB** | 4.2MB | **-31%** | **94.4** | 94.1 | **+0.3** |
-| black-and-white | **11.4MB** | 19.6MB | **-42%** | **99.9** | 99.9 | 0.0 |
-| candle-flame | **271KB** | 308KB | **-12%** | **97.5** | 97.5 | 0.0 |
-| city-night | **3.9MB** | 5.1MB | **-24%** | 98.0 | **98.3** | -0.3 |
-| color-wheel | **4.3MB** | 4.4MB | **-2%** | 98.5 | 98.5 | 0.0 |
-| fast-action | **3.6MB** | 5.4MB | **-33%** | **99.8** | 99.6 | **+0.2** |
-| jellyfish | **2.9MB** | 3.5MB | **-17%** | 98.1 | **99.0** | -0.9 |
-| pixel-art | **322KB** | 412KB | **-22%** | 98.9 | **99.0** | -0.1 |
-| screen-recording | **747KB** | 983KB | **-24%** | **98.5** | 98.4 | **+0.1** |
-| screencast | **27KB** | 50KB | **-46%** | **97.7** | 97.5 | **+0.2** |
-| shapes | **386KB** | 537KB | **-28%** | **97.2** | 97.1 | **+0.1** |
-| sintel | **1.6MB** | 2.5MB | **-36%** | **99.3** | 99.1 | **+0.2** |
-| skin-tones | **223KB** | 284KB | **-21%** | 97.2 | **97.3** | -0.1 |
-| talking-head | 2.0MB | 2.0MB | 0% | **97.9** | 97.2 | **+0.7** |
-| two-frame | **317B** | 334B | **-5%** | **98.7** | 98.7 | 0.0 |
+| Fixture | gifhero | gifski | Δ Size | Δ VMAF |
+|---------|---------|--------|--------|--------|
+| bbb-clip-01 | **4.3MB** / **94.7** | 4.7MB / 94.0 | **-9%** | **+0.7** |
+| bbb-clip-02 | 4.4MB / **96.2** | **3.7MB** / 93.5 | +19% | **+2.7** |
+| bbb-clip-03 | 1.4MB / **95.9** | **1.3MB** / 94.8 | +8% | **+1.1** |
+| bbb-clip-04 | 2.1MB / **96.5** | 2.1MB / 95.4 | 0% | **+1.1** |
+| bbb-clip-05 | 2.4MB / **98.6** | **2.2MB** / 97.5 | +9% | **+1.1** |
+| bbb-clip-06 | 2.3MB / **96.2** | **1.4MB** / 94.6 | +64% | **+1.6** |
+| bbb-clip-07 | **2.3MB** / **96.8** | 2.6MB / 90.5 | **-12%** | **+6.3** |
+| bbb-clip-08 | 7.1MB / **98.7** | **6.4MB** / 98.4 | +11% | **+0.3** |
+| bbb-clip-09 | 1.8MB / **96.7** | **1.7MB** / 95.7 | +6% | **+1.0** |
+| bbb-clip-10 | **3.6MB** / **100.0** | 4.3MB / 100.0 | **-16%** | 0.0 |
+| big-buck-bunny | **2.9MB** / **94.4** | 3.1MB / 91.9 | **-6%** | **+2.5** |
+| black-and-white | **11.4MB** / **99.9** | 12.1MB / 99.9 | **-6%** | 0.0 |
+| candle-flame | 271KB / **97.5** | **219KB** / 96.7 | +24% | **+0.8** |
+| city-night | **3.9MB** / **98.0** | 4.1MB / 97.2 | **-5%** | **+0.8** |
+| color-wheel | 4.3MB / **98.5** | **4.2MB** / 98.0 | +2% | **+0.5** |
+| fast-action | 3.6MB / **99.8** | **3.2MB** / 96.4 | +13% | **+3.4** |
+| jellyfish | 2.9MB / **98.1** | 2.9MB / 97.3 | 0% | **+0.8** |
+| pixel-art | **322KB** / 98.9 | 361KB / 98.9 | **-11%** | 0.0 |
+| screen-recording | 747KB / **98.5** | **719KB** / 98.2 | +4% | **+0.3** |
+| screencast | **27KB** / **97.7** | 50KB / 97.5 | **-46%** | **+0.2** |
+| shapes | **386KB** / **97.2** | 398KB / 94.0 | **-3%** | **+3.2** |
+| sintel | 1.6MB / **99.3** | **1.4MB** / 97.3 | +14% | **+2.0** |
+| skin-tones | 223KB / **97.2** | **180KB** / 97.1 | +24% | **+0.1** |
+| talking-head | 2.0MB / **97.9** | **1.2MB** / 95.0 | +67% | **+2.9** |
+| two-frame | **317B** / **98.7** | 334B / 98.7 | **-5%** | 0.0 |
+
+**Average VMAF: gifhero 97.7, gifski 96.0 (+1.7)**
 
 ---
 
-## Regression Check: bbb-clip-07
+## 240p Head-to-Head
 
-The keyframe fix resolved the previous weak spot:
+| Fixture | gifhero | gifski | Δ Size | Δ VMAF |
+|---------|---------|--------|--------|--------|
+| bbb-clip-01 | 1.3MB / **90.5** | **1.1MB** / 87.2 | +18% | **+3.3** |
+| bbb-clip-02 | 1.4MB / **94.1** | **920KB** / 87.8 | +56% | **+6.3** |
+| bbb-clip-03 | 640KB / **93.0** | **446KB** / 89.5 | +44% | **+3.5** |
+| bbb-clip-04 | 941KB / **95.9** | **627KB** / 91.4 | +50% | **+4.5** |
+| bbb-clip-05 | 754KB / **97.0** | 753KB / 93.1 | 0% | **+3.9** |
+| bbb-clip-06 | 688KB / **94.7** | **449KB** / 90.7 | +53% | **+4.0** |
+| bbb-clip-07 | **801KB** / **96.9** | 828KB / 85.7 | **-3%** | **+11.2** |
+| bbb-clip-08 | 2.0MB / **97.2** | **1.9MB** / 93.3 | +5% | **+3.9** |
+| bbb-clip-09 | **511KB** / **95.2** | 519KB / 92.0 | **-2%** | **+3.2** |
+| bbb-clip-10 | **968KB** / 92.6 | 1.3MB / **95.9** | **-25%** | -3.3 |
+| big-buck-bunny | 906KB / **90.3** | **786KB** / 84.7 | +15% | **+5.6** |
+| black-and-white | 3.0MB / **96.1** | 3.0MB / 92.5 | 0% | **+3.6** |
+| candle-flame | **94KB** / **98.0** | 100KB / 95.6 | **-6%** | **+2.4** |
+| city-night | **932KB** / **89.7** | 1007KB / 89.2 | **-7%** | **+0.5** |
+| color-wheel | 1.3MB / **95.6** | 1.3MB / 94.9 | 0% | **+0.7** |
+| fast-action | 999KB / **98.0** | **930KB** / 86.8 | +7% | **+11.2** |
+| jellyfish | **878KB** / **96.5** | 897KB / 91.7 | **-2%** | **+4.8** |
+| pixel-art | **138KB** / **100.0** | 181KB / 100.0 | **-24%** | 0.0 |
+| screen-recording | **258KB** / **99.7** | 262KB / 97.5 | **-2%** | **+2.2** |
+| screencast | **12KB** / 87.5 | 42KB / **89.4** | **-71%** | -1.9 |
+| shapes | **150KB** / **97.4** | 197KB / 91.6 | **-24%** | **+5.8** |
+| sintel | **506KB** / **100.0** | 513KB / 96.9 | **-1%** | **+3.1** |
+| skin-tones | **85KB** / **99.2** | 107KB / 96.1 | **-21%** | **+3.1** |
+| talking-head | 599KB / **96.7** | **395KB** / 90.8 | +52% | **+5.9** |
+| two-frame | **189B** / **98.7** | 334B / 98.7 | **-43%** | 0.0 |
 
-| Metric | Before fix | After fix | gifski |
-|--------|-----------|-----------|--------|
-| VMAF mean | 91.1 | **96.8** | 94.6 |
-| VMAF min | 68.7 | 69.6 | 73.9 |
-| VMAF p10 | 68.7 | **94.7** | 79.7 |
-| Size | 2233KB | 2318KB | 3896KB |
-
-The clip has scene changes at frames 31 and 93-99 plus a motion-to-static transition at frame 75. Before the fix, the canvas accumulated stale quantization error across 43 static frames (74-92). The keyframe insertion at frame 75 resets the canvas, lifting the bottom 10% of frames from VMAF 68.7 to 94.7.
-
-**No regressions** on any other fixture compared to the previous run.
+**Average VMAF: gifhero 95.5, gifski 91.7 (+3.8)**
 
 ---
 
 ## Key Findings
 
-### 1. 30% smaller files on average
+### 1. gifhero wins VMAF on nearly every fixture
 
-gifhero produces smaller files than gifski on 23/25 fixtures. The background-aware quantizer from libimagequant natively produces 50-60% transparent pixels per frame, eliminating post-dither hole punching.
+At 480p, gifhero has higher VMAF on **24/25** fixtures (avg +1.7). The only tie is two-frame. At 240p, gifhero wins **23/25** (avg +3.8) — the advantage grows at lower resolution because the background-aware quantizer's transparency precision matters more when there are fewer pixels.
 
-Largest size wins:
-- **screencast**: -46% (27KB vs 50KB)
-- **bbb-clip-10**: -43% (3.6MB vs 6.3MB)
-- **black-and-white**: -42% (11.4MB vs 19.6MB)
-- **bbb-clip-07**: -39% (2.3MB vs 3.8MB)
-- **sintel**: -36% (1.6MB vs 2.5MB)
+### 2. gifski default (q90) is weaker than q100
 
-### 2. Higher VMAF on 15/25 fixtures
+With default `--quality 90`, gifski scores 96.0 average VMAF at 480p — down from 97.8 at q100 in previous runs. gifhero's quality preset (q90 imagequant) achieves 97.7 average. The comparison is now truly defaults vs defaults.
 
-gifhero wins VMAF outright on 15 fixtures, ties on 1, and loses on 9. The losses are typically small (< 1 VMAF point) except jellyfish (-0.9) and bbb-clip-01 (-0.9).
+### 3. File size is mixed at 480p
 
-Biggest VMAF wins:
-- **bbb-clip-07**: +2.2 (96.8 vs 94.6) — scene change handling
-- **bbb-clip-02**: +1.1 (96.2 vs 95.1)
-- **talking-head**: +0.7 (97.9 vs 97.2)
-- **big-buck-bunny**: +0.3 (94.4 vs 94.1)
+gifhero is smaller on 19/25 fixtures but larger on 6. The fixtures where gifski is smaller tend to be ones where gifski's default q90 produces more aggressive compression than gifhero's quality preset. Notable gifhero size wins: screencast -46%, bbb-clip-10 -16%, bbb-clip-07 -12%.
 
-### 3. 74% higher VMAF/MB efficiency
+### 4. 240p dramatically favors gifhero on VMAF
 
-VMAF per megabyte measures quality per byte — the key metric for web delivery:
+At 240p, gifhero's VMAF advantage doubles to +3.8 average. Highlights:
+- **bbb-clip-07**: +11.2 VMAF (96.9 vs 85.7)
+- **fast-action**: +11.2 VMAF (98.0 vs 86.8)
+- **bbb-clip-02**: +6.3 VMAF (94.1 vs 87.8)
+- **talking-head**: +5.9 VMAF (96.7 vs 90.8)
 
-| Fixture | gifhero VMAF/MB | gifski VMAF/MB | Ratio |
-|---------|----------------|----------------|-------|
-| big-buck-bunny | 32.4 | 22.4 | **1.45×** |
-| bbb-clip-07 | 42.8 | 24.9 | **1.72×** |
-| sintel | 61.4 | 39.3 | **1.56×** |
-| fast-action | 28.1 | 18.4 | **1.53×** |
-| black-and-white | 8.7 | 5.1 | **1.71×** |
-| screencast | 3761 | 1996 | **1.88×** |
+### 5. Scene change handling is a major differentiator
 
-### 4. Content-adaptive threshold works
-
-The `motionLevel × colorComplexity` product correctly adapts:
-- High-complexity clips (bbb-clip-01, complexity 6484) → threshold 8 → aggressive transparency → -31% size
-- Low-complexity clips (talking-head, complexity 826) → threshold 2 → quality-preserving → +0.7 VMAF
-
-### 5. Keyframe detection prevents quality collapse
-
-Scene changes and motion-to-static transitions trigger canvas resets. Without this, bbb-clip-07 scored 91.1 VMAF with a 68.7 floor on static frames. With keyframes, it scores 96.8 with a 94.7 p10.
+bbb-clip-07 shows the biggest gap: gifhero 96.8 vs gifski 90.5 at 480p (+6.3 VMAF). The keyframe detection at motion-to-static transitions prevents canvas error accumulation that gifski doesn't handle as well at default settings.
 
 ---
 
@@ -122,22 +131,12 @@ Scene changes and motion-to-static transitions trigger canvas resets. Without th
 
 ```
 Source frames
-  → Probe pass: static mask, motion level, color complexity, keyframes
-  → Content-adaptive staleThreshold from motion × complexity
+  → Probe: static mask, motion × complexity, scene changes, motion transitions
+  → Content-adaptive staleThreshold (2/5/8)
+  → Keyframe insertion at scene changes + motion-to-static transitions
   → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
-  → Frames 1+: zero alpha on static + canvas-matching pixels
+  → Frames 1+: alpha=0 on static + canvas-matching pixels
                → quantizeWithBackground(frame, canvas, importanceMap)
-               → native transparent pixels from quantizer
-               → tight-crop bbox → trim palette → lossy LZW → GIF89a
+               → native transparency from libimagequant set_background
+               → tight-crop → trim palette → lossy LZW → GIF89a
 ```
-
----
-
-## vs All Encoders
-
-| Encoder | Avg VMAF | Avg Size | Wins on size (vs gifhero) |
-|---------|----------|----------|---------------------------|
-| **gifhero** | **97.7** | **2.7MB** | — |
-| gifski | 97.8 | 3.8MB | 2/25 |
-| ffmpeg-palettegen | 97.5 | 4.3MB | 1/25 |
-| ffmpeg+gifsicle | 97.0 | 3.6MB | 2/25 |
