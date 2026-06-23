@@ -459,7 +459,13 @@ async function encodeSubframePipeline(
     neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
   }
 
-  const staleThreshold = opts.optimize.staleThreshold;
+  // Content-adaptive stale threshold. The product of motion level
+  // and color complexity predicts per-frame palette divergence:
+  // high divergence needs a looser threshold to find transparency.
+  const complexity = probe.motionLevel * probe.colorComplexity;
+  const staleThreshold = complexity > 5000 ? 8
+    : complexity > 1000 ? 5
+    : 2;
 
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
@@ -511,9 +517,9 @@ async function encodeSubframePipeline(
         }
       }
 
-      // Zero alpha on pixels where source ≈ canvas within tight
-      // threshold. The quantizer handles edge blending via
-      // set_background, so we only mark genuinely unchanged pixels.
+      // Zero alpha on pixels where source ≈ canvas within the
+      // adaptive threshold. The quantizer handles edge blending
+      // via set_background; this marks genuinely unchanged pixels.
       for (let j = 0; j < numPixels; j++) {
         if (inputRgba[j * 4 + 3] === 0) continue;
         const si = j * 4;
@@ -522,7 +528,7 @@ async function encodeSubframePipeline(
           Math.abs(inputRgba[si + 1] - canvasRgba[si + 1]),
           Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
         );
-        if (d <= 5) {
+        if (d <= staleThreshold) {
           inputRgba[si + 3] = 0;
         }
       }
