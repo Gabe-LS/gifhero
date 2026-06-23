@@ -154,19 +154,11 @@ const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> 
   "gifhero-240p": {
     available: () => true,
     encode: async (framesDir, outputPath) => {
-      const full = loadPngFrames(framesDir);
-      const hw = Math.round(full.width / 2);
-      const hh = Math.round(full.height / 2);
-      const scaled = full.frames.map((f) => {
-        const c = createCanvas(hw, hh);
-        const src = createCanvas(full.width, full.height);
-        src.getContext("2d").putImageData(
-          new (globalThis as any).ImageData(f.data, full.width, full.height), 0, 0,
-        );
-        c.getContext("2d").drawImage(src, 0, 0, hw, hh);
-        return { data: c.getContext("2d").getImageData(0, 0, hw, hh).data, delay: f.delay };
-      });
-      writeFileSync(outputPath, await encode({ width: hw, height: hh, frames: scaled, preset: "quality" }));
+      const { width, height, frames } = loadPngFrames(framesDir);
+      writeFileSync(outputPath, await encode({
+        width, height, frames, preset: "quality",
+        targetWidth: Math.round(width / 2),
+      }));
     },
   },
 };
@@ -841,27 +833,13 @@ async function main() {
         let w = loaded.width, h = loaded.height;
         let frameData = loaded.frames;
 
-        if (is240p) {
-          const hw = Math.round(w / 2);
-          const hh = Math.round(h / 2);
-          frameData = loaded.frames.map((f) => {
-            const src = createCanvas(w, h);
-            const srcCtx = src.getContext("2d");
-            const imgData = srcCtx.createImageData(w, h);
-            imgData.data.set(f.data);
-            srcCtx.putImageData(imgData, 0, 0);
-            const dst = createCanvas(hw, hh);
-            dst.getContext("2d").drawImage(src, 0, 0, hw, hh);
-            return { data: dst.getContext("2d").getImageData(0, 0, hw, hh).data, delay: f.delay };
-          });
-          w = hw;
-          h = hh;
-        }
-
         allJobs.push({
           frames: frameData.map((f) => ({ data: f.data, delay: f.delay })),
           width: w, height: h,
-          options: { preset: "quality" as const },
+          options: {
+            preset: "quality" as const,
+            ...(is240p ? { targetWidth: Math.round(w / 2) } : {}),
+          },
         });
       }
 
