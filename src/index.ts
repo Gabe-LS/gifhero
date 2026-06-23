@@ -515,11 +515,16 @@ async function encodeSubframePipeline(
   const autoThreshold = Math.min(8, Math.max(motionFloor,
     Math.round(3 + 5 * Math.min(1, complexity / 4000)),
   ));
-  // Use auto-computed value scaled by downscale ratio, but let user
-  // override via staleThreshold (detected by differing from preset default of 8)
+  // Scale threshold only for ≥2× downscale where Lanczos3 smoothing
+  // meaningfully reduces inter-frame diffs. Mild downscale (360p) has
+  // nearly identical dithering behavior to native resolution.
+  const scaledThreshold = downscaleRatio >= 2
+    ? Math.max(1, Math.round(autoThreshold / Math.sqrt(downscaleRatio)))
+    : autoThreshold;
+  // Let user override via staleThreshold (detected by differing from preset default of 8)
   const staleThreshold = opts.optimize.staleThreshold !== 8
     ? opts.optimize.staleThreshold
-    : Math.max(1, Math.round(autoThreshold / Math.sqrt(downscaleRatio)));
+    : scaledThreshold;
 
   const sceneChangeSet = new Set(probe.sceneChanges);
 
