@@ -335,6 +335,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   }
 
   // ── Downscale if requested ──
+  const srcWidth = width;
   if (options.targetWidth && options.targetWidth < width) {
     const resized = resizeFrames(
       frames, width, height,
@@ -347,6 +348,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
       delay: f.delay ?? (frames[0]?.delay ?? 100),
     }));
   }
+  const downscaleRatio = srcWidth / width;
 
   const opts = resolveOptions(options);
 
@@ -387,7 +389,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const gifFrames = await encodeSubframePipeline(frames, width, height, opts);
+    const gifFrames = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio);
     return writeGif(gifFrames, {
       width, height, loop: opts.loop,
       lzwEncoder: buildLzwEncoder(opts.lossyLzw, gifFrames),
@@ -416,6 +418,7 @@ async function encodeSubframePipeline(
   width: number,
   height: number,
   opts: ResolvedOptions,
+  downscaleRatio: number = 1,
 ): Promise<GifFrame[]> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
@@ -482,10 +485,15 @@ async function encodeSubframePipeline(
   // Content-adaptive stale threshold. The product of motion level
   // and color complexity predicts per-frame palette divergence:
   // high divergence needs a looser threshold to find transparency.
+  // Scale down proportionally to downscale ratio: at lower resolutions,
+  // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
+  // threshold would be too aggressive (excess transparency → noisy
+  // boundaries that hurt LZW and quality).
   const complexity = probe.motionLevel * probe.colorComplexity;
-  const staleThreshold = complexity > 5000 ? 8
+  const baseThreshold = complexity > 5000 ? 8
     : complexity > 1000 ? 5
     : 2;
+  const staleThreshold = Math.max(1, Math.round(baseThreshold / Math.sqrt(downscaleRatio)));
 
   const sceneChangeSet = new Set(probe.sceneChanges);
 
