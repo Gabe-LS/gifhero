@@ -508,11 +508,20 @@ async function encodeSubframePipeline(
   // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
   // threshold would be too aggressive (excess transparency → noisy
   // boundaries that hurt LZW and quality).
+  // Content-adaptive stale threshold. Base threshold from motion ×
+  // color complexity, with a floor from motion level alone — even
+  // low-complexity photographic content (talking-head) benefits from
+  // moderate transparency when per-frame dithering shifts.
   const complexity = probe.motionLevel * probe.colorComplexity;
-  const baseThreshold = complexity > 5000 ? 8
-    : complexity > 1000 ? 5
-    : 2;
-  const staleThreshold = Math.max(1, Math.round(baseThreshold / Math.sqrt(downscaleRatio)));
+  const motionFloor = probe.motionLevel > 0.05 ? 5 : 2;
+  const autoThreshold = complexity > 5000 ? 8
+    : complexity > 1000 ? Math.max(5, motionFloor)
+    : motionFloor;
+  // Use auto-computed value scaled by downscale ratio, but let user
+  // override via staleThreshold (detected by differing from preset default of 8)
+  const staleThreshold = opts.optimize.staleThreshold !== 8
+    ? opts.optimize.staleThreshold
+    : Math.max(1, Math.round(autoThreshold / Math.sqrt(downscaleRatio)));
 
   const sceneChangeSet = new Set(probe.sceneChanges);
 
