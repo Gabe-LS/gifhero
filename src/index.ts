@@ -31,6 +31,8 @@ import { resizeFrames } from "./resize.js";
 import {
   quantizeWithBackground as gifQuantBg,
   quantizeSimple as gifQuantSimple,
+  buildSharedPalette as gifBuildPalette,
+  remapWithPalette as gifRemapPalette,
 } from "./quantizers/imagequant-gif.js";
 import type { GifQuantResult } from "./quantizers/imagequant-gif.js";
 
@@ -443,6 +445,20 @@ async function encodeSubframePipeline(
     }
   }
 
+  // ── Shared palette for consistent transparency ──
+  // Use shared palette when downscaling (per-frame palettes fragment
+  // at lower resolutions) or when user explicitly requests global.
+  let sharedPalette: Uint8Array | null = null;
+  if (useGifQuant && (downscaleRatio > 1.05 || opts.palette === "global")) {
+    const step = Math.max(1, Math.floor(frames.length / 10));
+    const sampled: Uint8ClampedArray[] = [];
+    for (let f = 0; f < frames.length; f += step) sampled.push(frames[f].data);
+    sharedPalette = gifBuildPalette(
+      sampled, width, height,
+      opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, opts.maxColors - 1),
+    );
+  }
+
   // ── Importance map (reused across frames) ──
   const importanceMap = new Uint8Array(numPixels);
   for (let j = 0; j < numPixels; j++) {
@@ -563,11 +579,13 @@ async function encodeSubframePipeline(
         }
       }
 
-      const r = gifQuantBg(
-        inputRgba, width, height,
-        canvasRgba, importanceMap,
-        opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
-      );
+      const r = sharedPalette
+        ? gifRemapPalette(inputRgba, width, height, sharedPalette, canvasRgba)
+        : gifQuantBg(
+            inputRgba, width, height,
+            canvasRgba, importanceMap,
+            opts.quantizerQuality, opts.quantizerSpeed, opts.maxColors,
+          );
 
       const tIdx = r.transparentIndex;
       const rgbPal = rgbaToRgbPalette(r.palette, r.paletteCount);
