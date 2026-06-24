@@ -65,12 +65,12 @@ export class StreamSource implements FrameSource {
     const srcH = video.videoHeight;
     let width = srcW;
     let height = srcH;
-    const extractCap = srcW > 2560 ? 1920 : srcW;
     if (this._targetWidth && this._targetWidth < srcW) {
-      width = Math.min(extractCap, Math.max(this._targetWidth, this._targetWidth * 2));
+      const extractTarget = Math.min(srcW, this._targetWidth * 3);
+      width = srcW > 2560 ? Math.min(1920, extractTarget) : extractTarget;
       height = Math.floor(srcH * (width / srcW));
-    } else if (extractCap < srcW) {
-      width = extractCap;
+    } else if (srcW > 2560) {
+      width = 1920;
       height = Math.floor(srcH * (width / srcW));
     }
     const fps = this.options.fps ?? 10;
