@@ -7,8 +7,7 @@
  */
 
 import { Input, BufferSource, ALL_FORMATS, VideoSampleSink } from "mediabunny";
-import { encode, IncrementalProbe } from "../../index.js";
-import type { EncodeFrame } from "../../index.js";
+import { encodeWasm } from "../../encode-wasm.js";
 
 function wlog(...args: any[]) {
   console.log(`[gifhero-video ${new Date().toISOString().slice(11, 23)}]`, ...args);
@@ -79,7 +78,6 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     // ── Step 3: Decode + sample at target FPS + probe ──
     const canvas = new OffscreenCanvas(extractW, extractH);
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-    const probe = new IncrementalProbe(extractW, extractH);
     const bitmaps: ImageBitmap[] = [];
     const interval = 1 / fps;
     const delay = Math.round(1000 / fps);
@@ -101,8 +99,6 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
         ctx.drawImage(videoFrame, 0, 0, extractW, extractH);
         videoFrame.close();
 
-        const imageData = ctx.getImageData(0, 0, extractW, extractH);
-        probe.addFrame(imageData.data);
         const bitmap = await createImageBitmap(canvas);
         bitmaps.push(bitmap);
         nextSampleTime = ts + interval;
@@ -115,10 +111,8 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
       sample.close();
     }
 
-    const probeResult = probe.finalize();
     const extractMs = performance.now() - t0;
     wlog(`Decoded ${decoded} frames, sampled ${bitmaps.length} at ${fps}fps in ${(extractMs / 1000).toFixed(1)}s`);
-    wlog(`Probe: cc=${probeResult.colorComplexity}, motion=${probeResult.motionLevel.toFixed(3)}, scenes=${probeResult.sceneChanges.length}`);
 
     // ── Step 4: Materialize + encode ──
     (self as any).postMessage({ type: "progress", id, phase: "encoding", progress: 0 });
@@ -127,7 +121,7 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
 
     const encCanvas = new OffscreenCanvas(extractW, extractH);
     const encCtx = encCanvas.getContext("2d", { willReadFrequently: true })!;
-    const frames: EncodeFrame[] = [];
+    const frames: Array<{ data: Uint8ClampedArray; delay: number }> = [];
 
     for (let i = 0; i < bitmaps.length; i++) {
       encCtx.drawImage(bitmaps[i], 0, 0);
@@ -139,7 +133,6 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     }
     bitmaps.length = 0;
 
-    // targetWidth constrains the longest dimension.
     let finalTargetWidth: number | undefined;
     if (targetWidth) {
       const longestSrc = Math.max(srcW, srcH);
@@ -147,15 +140,9 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
       finalTargetWidth = Math.round(srcW * scale);
     }
 
-    const gif = await encode({
-      width: extractW,
-      height: extractH,
-      frames,
+    const gif = encodeWasm(frames, extractW, extractH, {
       preset,
-      loop,
-      ...(finalTargetWidth && finalTargetWidth < extractW ? { targetWidth: finalTargetWidth } : {}),
-      ...(lossyLzw !== undefined ? { lossyLzw } : {}),
-      ...(maxColors !== undefined ? { maxColors } : {}),
+      targetWidth: finalTargetWidth && finalTargetWidth < extractW ? finalTargetWidth : undefined,
     });
 
     input.dispose();

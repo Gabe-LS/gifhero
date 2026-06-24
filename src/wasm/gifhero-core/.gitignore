@@ -1,0 +1,8 @@
+*
+!.gitignore
+!gifhero-core-wasm.ts
+!gifhero_core_bg.b64.js
+!gifhero_core_bg.wasm
+!gifhero_core_bg.wasm.d.ts
+!gifhero_core.d.ts
+!gifhero_core.js
