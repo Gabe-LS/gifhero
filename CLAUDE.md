@@ -48,9 +48,7 @@ Source frames
   → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
       complexity = motionLevel × colorComplexity
-      motionFloor = motionLevel > 1% ? 5 : 3
-      autoThreshold = clamp(3, 10, round(3 + 7 × min(1, complexity / 5000)))
-      threshold = max(motionFloor, autoThreshold)
+      autoThreshold = clamp(5, 10, round(5 + 5 × min(1, complexity / 5000)))
   → Content-adaptive lossyLzw:
       adaptiveLzw = clamp(preset, 5, round(preset + complexity / 3000))
   → Adaptive maxColors: 192 when colorComplexity ≥ 20000, else 256
@@ -221,17 +219,18 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 
 ## Results vs gifski (200 encodes, 25 fixtures × 4 resolutions)
 
-| Resolution | VMAF wins | Size wins | Avg VMAF Δ |
-|-----------|-----------|-----------|------------|
-| **480p** | **12/25** | **22/25** | **+0.5** |
-| **360p** | **12/25** | **23/25** | **+0.7** |
-| **240p** | **16/25** | **25/25** | **+1.6** |
-| **160p** | **20/25** | **24/25** | **+2.5** |
+| Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
+|-----------|-----------|-----------|------------|------------|
+| **480p** | **9/25** | **24/25** | **+0.3** | **-16%** |
+| **360p** | **12/25** | **24/25** | **+0.5** | **-16%** |
+| **240p** | **15/25** | **25/25** | **+1.4** | **-17%** |
+| **160p** | **20/25** | **25/25** | **+2.3** | **-17%** |
 
-**Zero cases >10% larger than gifski. Zero VMAF losses >2 points.**
+**Zero cases >10% larger than gifski. Zero cases >5% larger. Zero VMAF losses >2 points.**
 
 ## Current Phase
-Phase 6 complete. Three content-adaptive optimizations reduce file size without relying on aggressive lossy LZW:
-1. Conditional shared palette (colorComplexity ≥ 8000 at native res, always when downscaling) for cross-frame LZW consistency
-2. Adaptive maxColors (192 when colorComplexity ≥ 20000) to reduce dithering noise on high-diversity content
-3. Adaptive lossyLzw capped at 5 (not 6) from probe motion × color complexity
+Phase 6 complete. Four content-adaptive optimizations reduce file size without relying on aggressive lossy LZW:
+1. Raised staleThreshold base to 5 (`round(5 + 5 × min(1, c/5000))`), eliminating motion floor — 2-3% savings across the board
+2. Conditional shared palette (colorComplexity ≥ 8000 at native res, always when downscaling) for cross-frame LZW consistency
+3. Adaptive maxColors (192 when colorComplexity ≥ 20000) to reduce dithering noise on high-diversity content
+4. Adaptive lossyLzw capped at 5 (not 6) from probe motion × color complexity

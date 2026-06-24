@@ -521,23 +521,13 @@ async function encodeSubframePipeline(
   // high divergence needs a looser threshold to find transparency.
   // Scale down proportionally to downscale ratio: at lower resolutions,
   // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
-  // threshold would be too aggressive (excess transparency → noisy
-  // boundaries that hurt LZW and quality).
-  // Content-adaptive stale threshold. Linear scale from complexity
-  // (motion × color diversity), with a floor from motion level.
   const complexity = probe.motionLevel * probe.colorComplexity;
-  const motionFloor = probe.motionLevel > 0.01 ? 5 : 3;
-  const autoThreshold = Math.min(10, Math.max(motionFloor,
-    Math.round(3 + 7 * Math.min(1, complexity / 5000)),
+  const autoThreshold = Math.min(10, Math.max(5,
+    Math.round(5 + 5 * Math.min(1, complexity / 5000)),
   ));
-  // Don't scale threshold — the shared palette (active at ≥2×
-  // downscale) handles transparency natively, so the threshold is
-  // just an alpha-zeroing hint, not the final transparency decision.
-  const scaledThreshold = autoThreshold;
-  // Let user override via staleThreshold (detected by differing from preset default of 8)
   const staleThreshold = opts.optimize.staleThreshold !== 8
     ? opts.optimize.staleThreshold
-    : scaledThreshold;
+    : autoThreshold;
 
   const sceneChangeSet = new Set(probe.sceneChanges);
 
