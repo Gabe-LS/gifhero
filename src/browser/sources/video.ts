@@ -44,10 +44,15 @@ export class VideoSource implements FrameSource {
     let width = srcW;
     let height = srcH;
 
-    // Extract at 2× target width so Lanczos3 in encode() handles the
-    // final downscale for quality. Caps at source resolution.
+    // Cap extraction at 1080p for sources larger than 1440p — the
+    // browser's bilinear drawImage handles the first pass, then
+    // Lanczos3 in encode() does the final downscale to target width.
+    const extractCap = srcW > 2560 ? 1920 : srcW;
     if (this._targetWidth && this._targetWidth < srcW) {
-      width = Math.min(srcW, this._targetWidth * 2);
+      width = Math.min(extractCap, Math.max(this._targetWidth, this._targetWidth * 2));
+      height = Math.floor(srcH * (width / srcW));
+    } else if (extractCap < srcW) {
+      width = extractCap;
       height = Math.floor(srcH * (width / srcW));
     }
 
