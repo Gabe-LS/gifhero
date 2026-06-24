@@ -292,6 +292,44 @@ export function trimPalette(
   const origColors = (palette.length / 3) | 0;
   if (count >= origColors) return { palette, indexed, transparentIndex };
 
+  // Target power-of-2 boundary: if evicting a few entries crosses
+  // a boundary (e.g., 33→32), minCodeSize drops by 1 bit, saving
+  // ~12% on LZW for this frame. Evict the least-used non-transparent
+  // entries by remapping them to their nearest palette neighbor.
+  let po2 = 2;
+  while (po2 < count) po2 <<= 1;
+  const prevPo2 = po2 >> 1;
+  const overshoot = count - prevPo2;
+  if (overshoot > 0 && overshoot <= Math.max(1, count >> 4) && prevPo2 >= 4) {
+    const freq = new Uint32Array(256);
+    for (let i = 0; i < indexed.length; i++) freq[indexed[i]]++;
+    if (transparentIndex != null && transparentIndex >= 0) freq[transparentIndex] = 0xFFFFFFFF;
+
+    const usedIndices: number[] = [];
+    for (let i = 0; i < 256; i++) if (used[i]) usedIndices.push(i);
+    usedIndices.sort((a, b) => freq[a] - freq[b]);
+
+    for (let e = 0; e < overshoot; e++) {
+      const victim = usedIndices[e];
+      if (transparentIndex != null && victim === transparentIndex) continue;
+      let bestDist = Infinity, bestIdx = -1;
+      const vr = palette[victim * 3], vg = palette[victim * 3 + 1], vb = palette[victim * 3 + 2];
+      for (const j of usedIndices) {
+        if (j === victim || !used[j]) continue;
+        if (transparentIndex != null && j === transparentIndex) continue;
+        const d = Math.abs(palette[j * 3] - vr) + Math.abs(palette[j * 3 + 1] - vg) + Math.abs(palette[j * 3 + 2] - vb);
+        if (d < bestDist) { bestDist = d; bestIdx = j; }
+      }
+      if (bestIdx >= 0) {
+        for (let i = 0; i < indexed.length; i++) {
+          if (indexed[i] === victim) indexed[i] = bestIdx;
+        }
+        used[victim] = 0;
+        count--;
+      }
+    }
+  }
+
   const oldToNew = new Uint8Array(256);
   const newPal = new Uint8Array(count * 3);
   let slot = 0;
