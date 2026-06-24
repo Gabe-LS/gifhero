@@ -1,0 +1,28 @@
+[package]
+name = "gifhero-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+imagequant = { version = "4", default-features = false }
+rayon = { version = "1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+
+[features]
+default = ["cli"]
+cli = ["clap", "rayon"]
+wasm = ["wasm-bindgen"]
+
+[[bin]]
+name = "gifhero"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[profile.release]
+opt-level = 2
+lto = true
+strip = true
