@@ -4,14 +4,19 @@ import type { FrameSource, ExtractedFrames, VideoSourceOptions } from "../types.
 /**
  * Extract frames from an HTMLVideoElement by seeking.
  *
- * Creates an offscreen canvas, seeks to each time position,
- * draws the video frame, and extracts RGBA pixel data.
+ * Creates an offscreen canvas at the target size (or source size if
+ * no target), seeks to each time position, draws the video frame
+ * (browser does the downscale via drawImage), and extracts RGBA pixels.
  */
 export class VideoSource implements FrameSource {
+  private _targetWidth?: number;
+
   constructor(
     private video: HTMLVideoElement,
     private options: VideoSourceOptions = {},
   ) {}
+
+  set targetWidth(w: number | undefined) { this._targetWidth = w; }
 
   async extract(
     onProgress?: (extracted: number, total: number) => void,
@@ -34,8 +39,15 @@ export class VideoSource implements FrameSource {
       throw new Error(`Invalid video time range: ${start}–${end}. Is the video loaded?`);
     }
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
+    const srcW = video.videoWidth;
+    const srcH = video.videoHeight;
+    let width = srcW;
+    let height = srcH;
+
+    if (this._targetWidth && this._targetWidth < srcW) {
+      width = this._targetWidth;
+      height = Math.floor(srcH * (width / srcW));
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -57,7 +69,7 @@ export class VideoSource implements FrameSource {
         video.addEventListener("seeked", () => resolve(), { once: true });
       });
 
-      ctx.drawImage(video, 0, 0);
+      ctx.drawImage(video, 0, 0, width, height);
       const imageData = ctx.getImageData(0, 0, width, height);
       frames.push({ data: imageData.data, delay });
       onProgress?.(i + 1, times.length);

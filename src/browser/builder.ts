@@ -81,6 +81,12 @@ export class GifHeroBuilder {
   async toGif(): Promise<Uint8Array> {
     const signal = this._abortController.signal;
 
+    // Pass target width to source so extraction happens at target
+    // resolution — avoids holding full-resolution frames in memory.
+    if (this._targetWidth && "targetWidth" in this._source) {
+      (this._source as any).targetWidth = this._targetWidth;
+    }
+
     log("Extracting frames...");
     const t0 = performance.now();
 
@@ -114,7 +120,6 @@ export class GifHeroBuilder {
       frames,
       preset: this._preset,
       loop: this._loop,
-      ...(this._targetWidth ? { targetWidth: this._targetWidth } : {}),
       ...(this._lossyLzw !== undefined ? { lossyLzw: this._lossyLzw } : {}),
       ...(this._maxColors !== undefined ? { maxColors: this._maxColors } : {}),
     };
@@ -198,7 +203,6 @@ export class GifHeroBuilder {
           width, height, frames,
           preset: this._preset,
           loop: this._loop,
-          ...(this._targetWidth ? { targetWidth: this._targetWidth } : {}),
           ...(this._lossyLzw !== undefined ? { lossyLzw: this._lossyLzw } : {}),
           ...(this._maxColors !== undefined ? { maxColors: this._maxColors } : {}),
         });

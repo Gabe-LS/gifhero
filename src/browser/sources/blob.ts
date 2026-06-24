@@ -8,10 +8,14 @@ import { VideoSource } from "./video.js";
  * then delegates to VideoSource for frame extraction.
  */
 export class BlobSource implements FrameSource {
+  private _targetWidth?: number;
+
   constructor(
     private blob: Blob | File,
     private options: VideoSourceOptions = {},
   ) {}
+
+  set targetWidth(w: number | undefined) { this._targetWidth = w; }
 
   async extract(
     onProgress?: (extracted: number, total: number) => void,
@@ -35,6 +39,7 @@ export class BlobSource implements FrameSource {
       });
 
       const source = new VideoSource(video, this.options);
+      source.targetWidth = this._targetWidth;
       return await source.extract(onProgress, signal);
     } finally {
       URL.revokeObjectURL(url);

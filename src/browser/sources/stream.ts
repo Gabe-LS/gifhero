@@ -10,6 +10,7 @@ import type { FrameSource, ExtractedFrames, StreamSourceOptions } from "../types
  */
 export class StreamSource implements FrameSource {
   private _duration?: number;
+  private _targetWidth?: number;
   private _stopResolve?: (result: ExtractedFrames) => void;
   private _recording = false;
 
@@ -19,6 +20,7 @@ export class StreamSource implements FrameSource {
   ) {}
 
   set duration(seconds: number | undefined) { this._duration = seconds; }
+  set targetWidth(w: number | undefined) { this._targetWidth = w; }
 
   async extract(
     onProgress?: (extracted: number, total: number) => void,
@@ -59,8 +61,14 @@ export class StreamSource implements FrameSource {
     });
     await video.play();
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
+    const srcW = video.videoWidth;
+    const srcH = video.videoHeight;
+    let width = srcW;
+    let height = srcH;
+    if (this._targetWidth && this._targetWidth < srcW) {
+      width = this._targetWidth;
+      height = Math.floor(srcH * (width / srcW));
+    }
     const fps = this.options.fps ?? 10;
     const interval = 1000 / fps;
     const delay = Math.round(interval);
