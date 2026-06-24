@@ -23,8 +23,8 @@
     label { display: block; margin-bottom: 4px; font-size: 0.85rem; }
     select, input[type="number"] { padding: 4px 8px; border-radius: 4px; border: 1px solid #333; background: #0a0a1a; color: #e0e0e0; width: 80px; }
     .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-    .compare { display: flex; gap: 24px; flex-wrap: wrap; }
-    .compare-col { flex: 1; min-width: 240px; }
+    .compare { display: flex; gap: 5px; flex-wrap: wrap; }
+    .compare-col { flex: 1; min-width: 200px; }
     .compare-col h3 { font-size: 0.95rem; margin-bottom: 4px; color: #ccc; }
     .winner { color: #4caf50; font-weight: bold; }
     .loser { color: #999; }
@@ -158,57 +158,50 @@
       const gifheroSize = gifheroGif.byteLength;
       console.log(`[benchmark] gifhero: ${(gifheroSize/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
 
-      // ── gifski-wasm (in-browser, same environment) ──
+      // ── gifski-wasm (in-browser, fair comparison) ──
+      // Use <video> seek extraction (no mediabunny needed on main thread)
       progress.textContent = "gifski-wasm: extracting frames...";
       let gifskiGif = null;
       let gifskiTime = 0;
 
       try {
-        // Extract frames for gifski using the same VideoDecoder pipeline
-        // We need raw RGBA frames at the target size
-        const { Input, BufferSource, ALL_FORMATS, VideoSampleSink } = await import("../../node_modules/mediabunny/dist/modules/src/index.js");
-        const videoBuffer2 = await file.arrayBuffer();
-        const input = new Input({ source: new BufferSource(new Uint8Array(videoBuffer2)), formats: ALL_FORMATS });
-        const videoTrack = await input.getPrimaryVideoTrack();
-        const decoderConfig = await videoTrack.getDecoderConfig();
-        const srcW = decoderConfig.codedWidth, srcH = decoderConfig.codedHeight;
-        const duration2 = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
+        const t2 = performance.now();
+        const videoUrl = URL.createObjectURL(file);
+        const video = document.createElement("video");
+        video.muted = true; video.playsInline = true; video.preload = "auto";
+        video.src = videoUrl;
 
-        // Scale to target
+        await new Promise((resolve, reject) => {
+          video.onloadedmetadata = resolve;
+          video.onerror = () => reject(new Error("Video load failed"));
+        });
+
+        const srcW = video.videoWidth, srcH = video.videoHeight;
         const longestSrc = Math.max(srcW, srcH);
         const scale = Math.min(1, MAX_DIMENSION / longestSrc);
         const outW = Math.round(srcW * scale);
         const outH = Math.round(srcH * scale);
+        const maxT = Math.min(video.duration, 20);
 
-        const canvas2 = new OffscreenCanvas(outW, outH);
+        const canvas2 = document.createElement("canvas");
+        canvas2.width = outW; canvas2.height = outH;
         const ctx2 = canvas2.getContext("2d", { willReadFrequently: true });
-        const sink = new VideoSampleSink(videoTrack);
+
         const gifskiFrames = [];
-        let nextT = 0;
         const interval2 = 1 / fps;
-
-        console.log(`[benchmark] gifski: extracting frames at ${outW}×${outH}...`);
-        const t2 = performance.now();
-
-        for await (const sample of sink.samples()) {
-          const ts = sample.timestamp ?? 0;
-          if (ts > 20) { sample.close(); break; }
-          if (ts >= nextT) {
-            const vf = sample.toVideoFrame();
-            ctx2.drawImage(vf, 0, 0, outW, outH);
-            vf.close();
-            gifskiFrames.push(ctx2.getImageData(0, 0, outW, outH).data);
-            nextT = ts + interval2;
-            if (gifskiFrames.length % 20 === 0) {
-              progress.textContent = `gifski-wasm: extracted ${gifskiFrames.length} frames...`;
-            }
+        for (let t = 0; t < maxT; t += interval2) {
+          video.currentTime = t;
+          await new Promise(r => video.onseeked = r);
+          ctx2.drawImage(video, 0, 0, outW, outH);
+          gifskiFrames.push(ctx2.getImageData(0, 0, outW, outH).data);
+          if (gifskiFrames.length % 20 === 0) {
+            progress.textContent = `gifski-wasm: extracted ${gifskiFrames.length} frames...`;
           }
-          sample.close();
         }
-        input.dispose();
+        URL.revokeObjectURL(videoUrl);
 
         const extractTime = ((performance.now() - t2) / 1000).toFixed(1);
-        console.log(`[benchmark] gifski: extracted ${gifskiFrames.length} frames in ${extractTime}s`);
+        console.log(`[benchmark] gifski: extracted ${gifskiFrames.length} frames (${outW}×${outH}) in ${extractTime}s`);
         progress.textContent = `gifski-wasm: encoding ${gifskiFrames.length} frames...`;
 
         // Send to gifski worker
@@ -221,6 +214,7 @@
           gifskiWorker.postMessage({ type: "init", id: 0, wasmUrl });
         });
 
+        const encodeT = performance.now();
         const frameBuffers = gifskiFrames.map(f => f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
 
         gifskiGif = await new Promise((resolve, reject) => {
@@ -236,7 +230,8 @@
 
         gifskiWorker.terminate();
         gifskiTime = (performance.now() - t2) / 1000;
-        console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (extract ${extractTime}s + encode ${(gifskiTime - parseFloat(extractTime)).toFixed(1)}s)`);
+        const encodeTime = ((performance.now() - encodeT) / 1000).toFixed(1);
+        console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (extract ${extractTime}s + encode ${encodeTime}s)`);
       } catch (err) {
         console.error("[benchmark] gifski-wasm error:", err);
       }
