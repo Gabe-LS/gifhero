@@ -114,12 +114,16 @@ export class GifHeroBuilder {
 
     this._onProgress?.({ phase: "encoding", progress: 0 });
 
+    // If source extracted at 2× target, Lanczos3 handles the final
+    // downscale for quality. If source extracted at target size already
+    // (e.g. fromFrames), targetWidth won't trigger downscale.
     const options: EncodeOptions = {
       width,
       height,
       frames,
       preset: this._preset,
       loop: this._loop,
+      ...(this._targetWidth && this._targetWidth < width ? { targetWidth: this._targetWidth } : {}),
       ...(this._lossyLzw !== undefined ? { lossyLzw: this._lossyLzw } : {}),
       ...(this._maxColors !== undefined ? { maxColors: this._maxColors } : {}),
     };
@@ -203,6 +207,7 @@ export class GifHeroBuilder {
           width, height, frames,
           preset: this._preset,
           loop: this._loop,
+          ...(this._targetWidth && this._targetWidth < width ? { targetWidth: this._targetWidth } : {}),
           ...(this._lossyLzw !== undefined ? { lossyLzw: this._lossyLzw } : {}),
           ...(this._maxColors !== undefined ? { maxColors: this._maxColors } : {}),
         });
