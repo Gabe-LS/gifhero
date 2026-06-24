@@ -104,6 +104,27 @@ export function lzwEncodeLossy(
   }
 
   let prefix = pixels[0];
+  let deferring = false;
+  let deferStart = 0;
+  let deferPixels = 0;
+  const DEFER_WINDOW = 256;
+
+  function checkDefer(): void {
+    if (!deferring) return;
+    deferPixels++;
+    if (deferPixels >= DEFER_WINDOW) {
+      const bytesEmitted = output.length - deferStart;
+      const bitsPerPixel = (bytesEmitted * 8) / deferPixels;
+      if (bitsPerPixel > 11) {
+        emit(clearCode, codeSize);
+        reset();
+        deferring = false;
+      } else {
+        deferStart = output.length;
+        deferPixels = 0;
+      }
+    }
+  }
 
   for (let i = 1; i < pixels.length; i++) {
     const suffix = pixels[i];
@@ -112,7 +133,6 @@ export function lzwEncodeLossy(
     if (dict.has(exactKey)) {
       prefix = dict.get(exactKey)!;
     } else if (isLossy && suffix !== transparentIndex) {
-      // Never substitute a transparent pixel — its index must be preserved
       let bestKey = -1;
       let bestDist = lossiness + 1;
       const base = suffix * 256;
@@ -139,10 +159,12 @@ export function lzwEncodeLossy(
           }
           dict.set(exactKey, nextCode);
           nextCode++;
-        } else {
-          emit(clearCode, codeSize);
-          reset();
+        } else if (!deferring) {
+          deferring = true;
+          deferStart = output.length;
+          deferPixels = 0;
         }
+        checkDefer();
 
         prefix = suffix;
       }
@@ -155,10 +177,12 @@ export function lzwEncodeLossy(
         }
         dict.set(exactKey, nextCode);
         nextCode++;
-      } else {
-        emit(clearCode, codeSize);
-        reset();
+      } else if (!deferring) {
+        deferring = true;
+        deferStart = output.length;
+        deferPixels = 0;
       }
+      checkDefer();
 
       prefix = suffix;
     }

@@ -59,6 +59,10 @@ export function lzwEncode(
   }
 
   let prefix = pixels[0];
+  let deferring = false;
+  let deferStart = 0;
+  let deferPixels = 0;
+  const DEFER_WINDOW = 256;
 
   for (let i = 1; i < pixels.length; i++) {
     const suffix = pixels[i];
@@ -75,9 +79,26 @@ export function lzwEncode(
         }
         dict.set(key, nextCode);
         nextCode++;
-      } else {
-        emit(clearCode, codeSize);
-        reset();
+      } else if (!deferring) {
+        deferring = true;
+        deferStart = output.length;
+        deferPixels = 0;
+      }
+
+      if (deferring) {
+        deferPixels++;
+        if (deferPixels >= DEFER_WINDOW) {
+          const bytesEmitted = output.length - deferStart;
+          const bitsPerPixel = (bytesEmitted * 8) / deferPixels;
+          if (bitsPerPixel > 11) {
+            emit(clearCode, codeSize);
+            reset();
+            deferring = false;
+          } else {
+            deferStart = output.length;
+            deferPixels = 0;
+          }
+        }
       }
 
       prefix = suffix;
