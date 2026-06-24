@@ -1,1 +1,2 @@
-// TODO: Phase 3 — Floyd-Steinberg + temporal locking
+// TODO: Floyd-Steinberg dithering (fallback path only).
+// The primary encode path uses imagequant's built-in dithering.
