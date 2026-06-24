@@ -44,14 +44,15 @@ export class VideoSource implements FrameSource {
     let width = srcW;
     let height = srcH;
 
-    // Extract at 3× target width: bilinear drawImage handles the
-    // first pass (≤4:1 ratio, still clean), then Lanczos3 in encode()
-    // does the final 3:1 downscale for sharp output.
-    // Capped at 1080p for sources >1440p to limit memory.
+    // Only pre-downscale if the source is significantly larger than
+    // 3× the target (15% tolerance). Bilinear drawImage handles the
+    // first pass, then Lanczos3 in encode() does the final downscale.
     if (this._targetWidth && this._targetWidth < srcW) {
-      const extractTarget = Math.min(srcW, this._targetWidth * 3);
-      width = srcW > 2560 ? Math.min(1920, extractTarget) : extractTarget;
-      height = Math.floor(srcH * (width / srcW));
+      const ideal = this._targetWidth * 3;
+      if (srcW > ideal * 1.15) {
+        width = Math.min(ideal, 1920);
+        height = Math.floor(srcH * (width / srcW));
+      }
     } else if (srcW > 2560) {
       width = 1920;
       height = Math.floor(srcH * (width / srcW));
