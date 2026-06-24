@@ -158,29 +158,87 @@
       const gifheroSize = gifheroGif.byteLength;
       console.log(`[benchmark] gifhero: ${(gifheroSize/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
 
-      // ── gifski (via server, if available) ──
-      progress.textContent = "gifski: encoding (server-side)...";
+      // ── gifski-wasm (in-browser, same environment) ──
+      progress.textContent = "gifski-wasm: extracting frames...";
       let gifskiGif = null;
       let gifskiTime = 0;
 
       try {
-        const t2 = performance.now();
-        const formData = new FormData();
-        formData.append("video", file);
-        formData.append("fps", String(fps));
-        formData.append("width", String(MAX_DIMENSION));
+        // Extract frames for gifski using the same VideoDecoder pipeline
+        // We need raw RGBA frames at the target size
+        const { Input, BufferSource, ALL_FORMATS, VideoSampleSink } = await import("../../node_modules/mediabunny/dist/modules/src/index.js");
+        const videoBuffer2 = await file.arrayBuffer();
+        const input = new Input({ source: new BufferSource(new Uint8Array(videoBuffer2)), formats: ALL_FORMATS });
+        const videoTrack = await input.getPrimaryVideoTrack();
+        const decoderConfig = await videoTrack.getDecoderConfig();
+        const srcW = decoderConfig.codedWidth, srcH = decoderConfig.codedHeight;
+        const duration2 = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
 
-        const resp = await fetch("/api/gifski", { method: "POST", body: formData });
-        if (resp.ok) {
-          const buf = await resp.arrayBuffer();
-          gifskiGif = new Uint8Array(buf);
-          gifskiTime = (performance.now() - t2) / 1000;
-          console.log(`[benchmark] gifski: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
-        } else {
-          console.log("[benchmark] gifski server not available (no /api/gifski endpoint)");
+        // Scale to target
+        const longestSrc = Math.max(srcW, srcH);
+        const scale = Math.min(1, MAX_DIMENSION / longestSrc);
+        const outW = Math.round(srcW * scale);
+        const outH = Math.round(srcH * scale);
+
+        const canvas2 = new OffscreenCanvas(outW, outH);
+        const ctx2 = canvas2.getContext("2d", { willReadFrequently: true });
+        const sink = new VideoSampleSink(videoTrack);
+        const gifskiFrames = [];
+        let nextT = 0;
+        const interval2 = 1 / fps;
+
+        console.log(`[benchmark] gifski: extracting frames at ${outW}×${outH}...`);
+        const t2 = performance.now();
+
+        for await (const sample of sink.samples()) {
+          const ts = sample.timestamp ?? 0;
+          if (ts > 20) { sample.close(); break; }
+          if (ts >= nextT) {
+            const vf = sample.toVideoFrame();
+            ctx2.drawImage(vf, 0, 0, outW, outH);
+            vf.close();
+            gifskiFrames.push(ctx2.getImageData(0, 0, outW, outH).data);
+            nextT = ts + interval2;
+            if (gifskiFrames.length % 20 === 0) {
+              progress.textContent = `gifski-wasm: extracted ${gifskiFrames.length} frames...`;
+            }
+          }
+          sample.close();
         }
-      } catch {
-        console.log("[benchmark] gifski server not reachable");
+        input.dispose();
+
+        const extractTime = ((performance.now() - t2) / 1000).toFixed(1);
+        console.log(`[benchmark] gifski: extracted ${gifskiFrames.length} frames in ${extractTime}s`);
+        progress.textContent = `gifski-wasm: encoding ${gifskiFrames.length} frames...`;
+
+        // Send to gifski worker
+        const gifskiWorker = new Worker("./dist/gifski-worker.js", { type: "module" });
+        const wasmUrl = new URL("./dist/gifski_wasm_bg.wasm", location.href).href;
+
+        await new Promise((resolve, reject) => {
+          gifskiWorker.onmessage = (e) => { if (e.data.type === "ready") resolve(null); };
+          gifskiWorker.onerror = (e) => reject(e);
+          gifskiWorker.postMessage({ type: "init", id: 0, wasmUrl });
+        });
+
+        const frameBuffers = gifskiFrames.map(f => f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
+
+        gifskiGif = await new Promise((resolve, reject) => {
+          gifskiWorker.onmessage = (e) => {
+            if (e.data.type === "result") resolve(new Uint8Array(e.data.gif));
+            else if (e.data.type === "error") reject(new Error(e.data.message));
+          };
+          gifskiWorker.postMessage(
+            { type: "encode", id: 1, frameBuffers, width: outW, height: outH, fps, quality: 90 },
+            frameBuffers,
+          );
+        });
+
+        gifskiWorker.terminate();
+        gifskiTime = (performance.now() - t2) / 1000;
+        console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (extract ${extractTime}s + encode ${(gifskiTime - parseFloat(extractTime)).toFixed(1)}s)`);
+      } catch (err) {
+        console.error("[benchmark] gifski-wasm error:", err);
       }
 
       // ── Show results ──
@@ -190,12 +248,11 @@
       if (gifskiGif) {
         const heroWins = gifheroSize <= gifskiGif.byteLength;
         results.innerHTML =
-          showCompare("benchResults", "gifhero", gifheroGif, gifheroTime, heroWins) +
-          showCompare("benchResults", "gifski", gifskiGif, gifskiTime, !heroWins);
+          showCompare("benchResults", "gifhero (in-browser)", gifheroGif, gifheroTime, heroWins) +
+          showCompare("benchResults", "gifski-wasm (in-browser)", gifskiGif, gifskiTime, !heroWins);
       } else {
         results.innerHTML = showCompare("benchResults", "gifhero", gifheroGif, gifheroTime, true) +
-          `<div class="compare-col"><h3>gifski</h3><div class="meta">Not available — needs a local gifski server at /api/gifski.<br>
-          Run: <code>npx tsx test/browser/gifski-server.ts</code></div></div>`;
+          `<div class="compare-col"><h3>gifski-wasm</h3><div class="meta">Failed to run — check console for errors.</div></div>`;
       }
 
       benchStart.disabled = false;
