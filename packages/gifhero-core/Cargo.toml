@@ -22,6 +22,9 @@ name = "gifhero"
 path = "src/main.rs"
 required-features = ["cli"]
 
+[dev-dependencies]
+png = "0.17"
+
 [profile.release]
 opt-level = 2
 lto = true
