@@ -23,9 +23,10 @@
     label { display: block; margin-bottom: 4px; font-size: 0.85rem; }
     select, input[type="number"] { padding: 4px 8px; border-radius: 4px; border: 1px solid #333; background: #0a0a1a; color: #e0e0e0; width: 80px; }
     .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-    .compare { display: flex; gap: 5px; flex-wrap: wrap; }
-    .compare-col { flex: 1; min-width: 200px; }
+    .compare { display: inline-flex; gap: 5px; }
+    .compare-col { }
     .compare-col h3 { font-size: 0.95rem; margin-bottom: 4px; color: #ccc; }
+    .compare-col img { display: block; }
     .winner { color: #4caf50; font-weight: bold; }
     .loser { color: #999; }
     .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
@@ -40,7 +41,7 @@
   <div class="panel">
     <input type="file" id="benchFile" accept="video/*">
     <div class="controls">
-      <label>FPS <input type="number" id="benchFps" value="10" min="1" max="30"></label>
+      <label>FPS <input type="number" id="benchFps" value="20" min="1" max="30"></label>
       <label>Preset
         <select id="benchPreset">
           <option value="balanced">balanced</option>
@@ -104,7 +105,7 @@
       return `
         <div class="compare-col">
           <h3>${label} <span class="${cls}">${sizeKB} KB · ${elapsed.toFixed(1)}s</span></h3>
-          <img src="${url}" alt="${label}" style="max-width: 100%;">
+          <img src="${url}" alt="${label}">
           <div class="meta"><a href="${url}" download="${label.toLowerCase()}.gif" style="color: #7ecfff;">Download</a></div>
         </div>
       `;

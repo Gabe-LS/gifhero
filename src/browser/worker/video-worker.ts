@@ -66,8 +66,8 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     const targetDim = targetWidth ?? longestSrc;
     if (targetDim < longestSrc) {
       const scale = targetDim / longestSrc;
-      const idealW = Math.round(srcW * scale * 3);
-      const idealH = Math.round(srcH * scale * 3);
+      const idealW = Math.round(srcW * scale * 2);
+      const idealH = Math.round(srcH * scale * 2);
       if (longestSrc > Math.max(idealW, idealH) * 1.15) {
         extractW = Math.min(idealW, 1920);
         extractH = Math.min(idealH, 1920);
