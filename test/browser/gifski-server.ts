@@ -30,7 +30,9 @@ const MIME: Record<string, string> = {
 
 function serveFile(url: string): { data: Buffer; mime: string } | null {
   try {
-    const path = join(ROOT, url === "/" ? "test/browser/index.html" : url);
+    let filePath = url;
+    if (filePath === "/" || filePath.endsWith("/")) filePath += "index.html";
+    const path = join(ROOT, filePath);
     const data = readFileSync(path);
     const mime = MIME[extname(path)] ?? "application/octet-stream";
     return { data, mime };
