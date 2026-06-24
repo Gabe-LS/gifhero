@@ -539,15 +539,20 @@ async function encodeSubframePipeline(
   // Scale down proportionally to downscale ratio: at lower resolutions,
   // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
   const complexity = probe.motionLevel * probe.colorComplexity;
+  // High motion makes stale pixels visible as trailing — reduce
+  // threshold so fewer pixels are marked transparent.
+  const motionAdjust = probe.motionLevel > 0.2
+    ? -Math.round(Math.min(3, (probe.motionLevel - 0.2) * 5))
+    : 0;
   let autoThreshold: number;
   if (isQuality) {
     const motionFloor = probe.motionLevel > 0.01 ? 5 : 4;
-    autoThreshold = Math.min(10, Math.max(motionFloor,
-      Math.round(4 + 6 * Math.min(1, complexity / 5000)),
+    autoThreshold = Math.min(10, Math.max(2,
+      Math.round(4 + 6 * Math.min(1, complexity / 5000)) + motionAdjust,
     ));
   } else {
-    autoThreshold = Math.min(10, Math.max(5,
-      Math.round(5 + 5 * Math.min(1, complexity / 5000)),
+    autoThreshold = Math.min(10, Math.max(2,
+      Math.round(5 + 5 * Math.min(1, complexity / 5000)) + motionAdjust,
     ));
   }
   const staleThreshold = opts.optimize.staleThreshold !== (isQuality ? 3 : 8)
