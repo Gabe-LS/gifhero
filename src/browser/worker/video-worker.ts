@@ -57,25 +57,24 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     const duration = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
     wlog(`Demuxed: ${srcW}×${srcH}, ${duration.toFixed(1)}s, codec=${decoderConfig.codec}`);
 
-    // Extract at up to 3× target (capped at 1080p longest side).
-    // Keeps Lanczos3 input clean while avoiding processing 4K frames.
+    // Pre-downscale via drawImage only if the source is significantly
+    // larger than 3× the target (15% tolerance). When downscaling,
+    // snap to the nearest integer ratio for clean bilinear sampling.
     let extractW = srcW;
     let extractH = srcH;
     const longestSrc = Math.max(srcW, srcH);
     if (targetWidth && targetWidth < longestSrc) {
-      const targetLong = targetWidth;
-      const idealLong = Math.min(targetLong * 3, 1080);
-      if (idealLong < longestSrc) {
-        const scale = idealLong / longestSrc;
-        extractW = Math.round(srcW * scale);
-        extractH = Math.round(srcH * scale);
+      const idealLong = targetWidth * 3;
+      if (longestSrc > idealLong * 1.15) {
+        const rawRatio = longestSrc / idealLong;
+        const snapRatio = Math.round(rawRatio);
+        if (snapRatio >= 2) {
+          extractW = Math.round(srcW / snapRatio);
+          extractH = Math.round(srcH / snapRatio);
+        }
       }
-    } else if (longestSrc > 1920) {
-      const scale = 1080 / longestSrc;
-      extractW = Math.round(srcW * scale);
-      extractH = Math.round(srcH * scale);
     }
-    wlog(`Extraction size: ${extractW}×${extractH}`);
+    wlog(`Extraction size: ${extractW}×${extractH}${extractW < srcW ? ` (${Math.round(srcW/extractW)}:1 snap)` : " (full resolution)"}`);
 
     // ── Step 3: Decode + sample at target FPS + probe ──
     const canvas = new OffscreenCanvas(extractW, extractH);
