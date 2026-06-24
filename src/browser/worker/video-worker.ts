@@ -57,11 +57,25 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     const duration = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
     wlog(`Demuxed: ${srcW}×${srcH}, ${duration.toFixed(1)}s, codec=${decoderConfig.codec}`);
 
-    // Extract at full resolution — Lanczos3 in encode() handles
-    // downscaling to targetWidth with maximum quality.
-    const extractW = srcW;
-    const extractH = srcH;
-    wlog(`Extraction size: ${extractW}×${extractH} (full resolution)`);
+    // Extract at up to 3× target (capped at 1080p longest side).
+    // Keeps Lanczos3 input clean while avoiding processing 4K frames.
+    let extractW = srcW;
+    let extractH = srcH;
+    const longestSrc = Math.max(srcW, srcH);
+    if (targetWidth && targetWidth < longestSrc) {
+      const targetLong = targetWidth;
+      const idealLong = Math.min(targetLong * 3, 1080);
+      if (idealLong < longestSrc) {
+        const scale = idealLong / longestSrc;
+        extractW = Math.round(srcW * scale);
+        extractH = Math.round(srcH * scale);
+      }
+    } else if (longestSrc > 1920) {
+      const scale = 1080 / longestSrc;
+      extractW = Math.round(srcW * scale);
+      extractH = Math.round(srcH * scale);
+    }
+    wlog(`Extraction size: ${extractW}×${extractH}`);
 
     // ── Step 3: Decode + sample at target FPS + probe ──
     const canvas = new OffscreenCanvas(extractW, extractH);
