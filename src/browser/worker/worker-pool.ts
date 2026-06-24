@@ -14,7 +14,11 @@ export class EncoderWorker {
   private getWorker(): Worker {
     if (this.worker) return this.worker;
     const url = new URL("./browser-worker.js", import.meta.url);
+    console.log("[gifhero] Creating worker from:", url.href);
     this.worker = new Worker(url, { type: "module" });
+    this.worker.addEventListener("error", (e) => {
+      console.error("[gifhero] Worker error:", e.message, e);
+    });
     return this.worker;
   }
 
