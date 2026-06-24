@@ -1,13 +1,12 @@
 /**
- * Video-to-GIF worker using Mediabunny demuxer + VideoDecoder.
+ * Video-to-GIF worker using Mediabunny + VideoDecoder (via VideoSampleSink).
  *
- * Handles the full pipeline inside a Web Worker:
- * demux → decode → downsample → probe → store ImageBitmap
+ * Full pipeline in a Web Worker:
+ * demux → decode (VideoSampleSink) → downsample → probe → ImageBitmap
  * → materialize → encode → return GIF
  */
 
-import { Input, BufferSource, ALL_FORMATS } from "mediabunny";
-import type { InputVideoTrack, EncodedPacket } from "mediabunny";
+import { Input, BufferSource, ALL_FORMATS, VideoSampleSink } from "mediabunny";
 import { encode, IncrementalProbe } from "../../index.js";
 import type { EncodeFrame } from "../../index.js";
 
@@ -72,7 +71,7 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     }
     wlog(`Extraction size: ${extractW}×${extractH}`);
 
-    // ── Step 3: Decode all frames via VideoDecoder ──
+    // ── Step 3: Decode + sample at target FPS + probe ──
     const canvas = new OffscreenCanvas(extractW, extractH);
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
     const probe = new IncrementalProbe(extractW, extractH);
@@ -80,68 +79,39 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     const interval = 1 / fps;
     const delay = Math.round(1000 / fps);
 
-    const decodedFrames: { timestamp: number; bitmap: ImageBitmap }[] = [];
-
-    const decoder = new VideoDecoder({
-      output: async (frame: VideoFrame) => {
-        const ts = frame.timestamp / 1e6;
-        ctx.drawImage(frame, 0, 0, extractW, extractH);
-        frame.close();
-        const bitmap = await createImageBitmap(canvas);
-        decodedFrames.push({ timestamp: ts, bitmap });
-      },
-      error: (err: DOMException) => {
-        wlog("VideoDecoder error:", err.message);
-      },
-    });
-
-    decoder.configure(decoderConfig);
-
-    // Feed packets to decoder
-    let packet: EncodedPacket | null = await videoTrack.getFirstPacket({});
-    let packetCount = 0;
-    while (packet) {
-      const chunk = new EncodedVideoChunk({
-        type: packet.type === "key" ? "key" : "delta",
-        timestamp: packet.timestamp * 1e6,
-        duration: packet.duration * 1e6,
-        data: packet.data,
-      });
-      decoder.decode(chunk);
-      packetCount++;
-      packet = await videoTrack.getNextPacket(packet, {});
-    }
-
-    await decoder.flush();
-    decoder.close();
-    wlog(`Decoded ${decodedFrames.length} frames from ${packetCount} packets`);
-
-    // ── Step 4: Sample at target FPS + probe ──
-    decodedFrames.sort((a, b) => a.timestamp - b.timestamp);
+    const sink = new VideoSampleSink(videoTrack);
     let nextSampleTime = 0;
+    let decoded = 0;
 
-    for (const { timestamp, bitmap } of decodedFrames) {
-      if (timestamp >= nextSampleTime) {
-        ctx.drawImage(bitmap, 0, 0);
+    for await (const sample of sink.samples()) {
+      decoded++;
+      const ts = sample.timestamp ?? 0;
+
+      if (ts >= nextSampleTime) {
+        const videoFrame = sample.toVideoFrame();
+        ctx.drawImage(videoFrame, 0, 0, extractW, extractH);
+        videoFrame.close();
+
         const imageData = ctx.getImageData(0, 0, extractW, extractH);
         probe.addFrame(imageData.data);
+        const bitmap = await createImageBitmap(canvas);
         bitmaps.push(bitmap);
-        nextSampleTime = timestamp + interval;
+        nextSampleTime = ts + interval;
 
         if (bitmaps.length % 20 === 0) {
-          (self as any).postMessage({ type: "progress", id, phase: "extracting", progress: timestamp / duration });
+          (self as any).postMessage({ type: "progress", id, phase: "extracting", progress: ts / duration });
         }
-      } else {
-        bitmap.close();
       }
+
+      sample.close();
     }
-    decodedFrames.length = 0;
 
     const probeResult = probe.finalize();
     const extractMs = performance.now() - t0;
-    wlog(`Probed ${bitmaps.length} frames in ${(extractMs / 1000).toFixed(1)}s (cc=${probeResult.colorComplexity}, motion=${probeResult.motionLevel.toFixed(3)})`);
+    wlog(`Decoded ${decoded} frames, sampled ${bitmaps.length} at ${fps}fps in ${(extractMs / 1000).toFixed(1)}s`);
+    wlog(`Probe: cc=${probeResult.colorComplexity}, motion=${probeResult.motionLevel.toFixed(3)}, scenes=${probeResult.sceneChanges.length}`);
 
-    // ── Step 5: Materialize + encode ──
+    // ── Step 4: Materialize + encode ──
     (self as any).postMessage({ type: "progress", id, phase: "encoding", progress: 0 });
     wlog(`Encoding ${bitmaps.length} frames...`);
     const t1 = performance.now();
@@ -175,8 +145,7 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
 
     const encodeMs = performance.now() - t1;
     const totalMs = performance.now() - t0;
-    wlog(`Encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB in ${(encodeMs / 1000).toFixed(1)}s`);
-    wlog(`Total: ${(totalMs / 1000).toFixed(1)}s (decode+probe ${(extractMs / 1000).toFixed(1)}s + encode ${(encodeMs / 1000).toFixed(1)}s)`);
+    wlog(`Done: ${(gif.byteLength / 1024).toFixed(0)} KB in ${(totalMs / 1000).toFixed(1)}s (decode ${(extractMs / 1000).toFixed(1)}s + encode ${(encodeMs / 1000).toFixed(1)}s)`);
 
     const buf = gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength);
     (self as any).postMessage({ type: "result", id, gif: buf }, [buf]);
