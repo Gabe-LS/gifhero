@@ -1219,9 +1219,11 @@ export async function encodeParallel(
     }
   }
 
-  // Delegate to the standard pipeline for probe + encode
-  // (the parallel quantization is the next optimization — for now,
-  // the parallel Lanczos3 alone gives a significant speedup)
+  // ── Phase 2b+: Sequential encode (probe + quantize + sub-frame) ──
+  // Quantization requires the true canvas for background-aware
+  // dithering and correct transparency. This dependency makes it
+  // inherently sequential. The parallel Lanczos3 in Phase 1
+  // captures 68% of the available speedup.
   const { gifFrames, probe } = await encodeSubframePipeline(
     frames, width, height, opts, downscaleRatio, presetName,
   );
