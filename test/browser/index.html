@@ -126,47 +126,14 @@
       results.innerHTML = "";
 
       const file = benchFile.files[0];
-      const fps = parseInt(document.getElementById("benchFps").value) || 10;
+      const fps = parseInt(document.getElementById("benchFps").value) || 20;
       const preset = document.getElementById("benchPreset").value;
 
-      // ── gifhero ──
-      progress.textContent = "gifhero: encoding...";
       console.log("━━━ BENCHMARK START ━━━");
-      const t1 = performance.now();
-
-      let gifheroGif;
-      try {
-        gifheroGif = await gifhero
-          .fromFile(file)
-          .fps(fps)
-          .width(MAX_DIMENSION)
-          .preset(preset)
-          .onProgress(p => {
-            if (p.phase === "extracting") {
-              progress.textContent = `gifhero: decoding ${(p.progress * 100).toFixed(0)}%`;
-            } else {
-              progress.textContent = "gifhero: encoding...";
-            }
-          })
-          .toGif();
-      } catch (err) {
-        progress.textContent = `gifhero error: ${err.message}`;
-        console.error(err);
-        benchStart.disabled = false;
-        return;
-      }
-      const gifheroTime = (performance.now() - t1) / 1000;
-      const gifheroSize = gifheroGif.byteLength;
-      console.log(`[benchmark] gifhero: ${(gifheroSize/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
-
-      // ── gifski-wasm (in-browser, fair comparison) ──
-      // Use <video> seek extraction (no mediabunny needed on main thread)
-      progress.textContent = "gifski-wasm: extracting frames...";
-      let gifskiGif = null;
-      let gifskiTime = 0;
 
       try {
-        const t2 = performance.now();
+        // ── Step 1: Extract frames ONCE (shared by both encoders) ──
+        progress.textContent = "Extracting frames (shared)...";
         const videoUrl = URL.createObjectURL(file);
         const video = document.createElement("video");
         video.muted = true; video.playsInline = true; video.preload = "auto";
@@ -182,30 +149,44 @@
         const scale = Math.min(1, MAX_DIMENSION / longestSrc);
         const outW = Math.round(srcW * scale);
         const outH = Math.round(srcH * scale);
-        const maxT = Math.min(video.duration, 20);
+        const maxT = Math.min(video.duration, MAX_DURATION);
+        const delay = Math.round(1000 / fps);
 
         const canvas2 = document.createElement("canvas");
         canvas2.width = outW; canvas2.height = outH;
         const ctx2 = canvas2.getContext("2d", { willReadFrequently: true });
 
-        const gifskiFrames = [];
+        const sharedFrames = [];
         const interval2 = 1 / fps;
+        const extractT = performance.now();
         for (let t = 0; t < maxT; t += interval2) {
           video.currentTime = t;
           await new Promise(r => video.onseeked = r);
           ctx2.drawImage(video, 0, 0, outW, outH);
-          gifskiFrames.push(ctx2.getImageData(0, 0, outW, outH).data);
-          if (gifskiFrames.length % 20 === 0) {
-            progress.textContent = `gifski-wasm: extracted ${gifskiFrames.length} frames...`;
+          sharedFrames.push(ctx2.getImageData(0, 0, outW, outH).data);
+          if (sharedFrames.length % 20 === 0) {
+            progress.textContent = `Extracting: ${sharedFrames.length} frames...`;
           }
         }
         URL.revokeObjectURL(videoUrl);
+        const extractTime = ((performance.now() - extractT) / 1000).toFixed(1);
+        console.log(`[benchmark] Extracted ${sharedFrames.length} shared frames (${outW}×${outH}) in ${extractTime}s`);
 
-        const extractTime = ((performance.now() - t2) / 1000).toFixed(1);
-        console.log(`[benchmark] gifski: extracted ${gifskiFrames.length} frames (${outW}×${outH}) in ${extractTime}s`);
-        progress.textContent = `gifski-wasm: encoding ${gifskiFrames.length} frames...`;
+        // ── Step 2: gifhero encode ──
+        progress.textContent = `gifhero: encoding ${sharedFrames.length} frames...`;
+        const heroFrames = sharedFrames.map(d => ({ data: d, delay }));
+        const t1 = performance.now();
+        const gifheroGif = await gifhero
+          .fromFrames(sharedFrames, outW, outH)
+          .fps(fps)
+          .preset(preset)
+          .mainThread()
+          .toGif();
+        const gifheroTime = (performance.now() - t1) / 1000;
+        console.log(`[benchmark] gifhero encode: ${(gifheroGif.byteLength/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
 
-        // Send to gifski worker
+        // ── Step 3: gifski-wasm encode (same frames) ──
+        progress.textContent = `gifski-wasm: encoding ${sharedFrames.length} frames...`;
         const gifskiWorker = new Worker("./dist/gifski-worker.js", { type: "module" });
         const wasmUrl = new URL("./dist/gifski_wasm_bg.wasm", location.href).href;
 
@@ -215,10 +196,14 @@
           gifskiWorker.postMessage({ type: "init", id: 0, wasmUrl });
         });
 
-        const encodeT = performance.now();
-        const frameBuffers = gifskiFrames.map(f => f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
+        const t2 = performance.now();
+        const frameBuffers = sharedFrames.map(f => {
+          const copy = new Uint8Array(f.length);
+          copy.set(f);
+          return copy.buffer;
+        });
 
-        gifskiGif = await new Promise((resolve, reject) => {
+        const gifskiGif = await new Promise((resolve, reject) => {
           gifskiWorker.onmessage = (e) => {
             if (e.data.type === "result") resolve(new Uint8Array(e.data.gif));
             else if (e.data.type === "error") reject(new Error(e.data.message));
@@ -228,27 +213,34 @@
             frameBuffers,
           );
         });
-
         gifskiWorker.terminate();
-        gifskiTime = (performance.now() - t2) / 1000;
-        const encodeTime = ((performance.now() - encodeT) / 1000).toFixed(1);
-        console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (extract ${extractTime}s + encode ${encodeTime}s)`);
-      } catch (err) {
-        console.error("[benchmark] gifski-wasm error:", err);
-      }
+        const gifskiTime = (performance.now() - t2) / 1000;
+        console.log(`[benchmark] gifski-wasm encode: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
 
-      // ── Show results ──
-      console.log("━━━ BENCHMARK END ━━━");
-      progress.textContent = "";
+        // ── Show results ──
+        console.log(`[benchmark] SUMMARY: ${sharedFrames.length} frames ${outW}×${outH} @ ${fps}fps`);
+        console.log(`[benchmark]   gifhero:    ${(gifheroGif.byteLength/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
+        console.log(`[benchmark]   gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
+        console.log(`[benchmark]   size: gifhero is ${((1 - gifheroGif.byteLength / gifskiGif.byteLength) * 100).toFixed(0)}% smaller`);
+        console.log(`[benchmark]   speed: gifhero is ${(gifskiTime / gifheroTime).toFixed(1)}× faster`);
+        console.log("━━━ BENCHMARK END ━━━");
 
-      if (gifskiGif) {
-        const heroWins = gifheroSize <= gifskiGif.byteLength;
+        progress.textContent = `Done (extraction: ${extractTime}s)`;
+
+        const heroSmaller = gifheroGif.byteLength <= gifskiGif.byteLength;
+        const heroFaster = gifheroTime <= gifskiTime;
         results.innerHTML =
-          showCompare("benchResults", "gifhero (in-browser)", gifheroGif, gifheroTime, heroWins) +
-          showCompare("benchResults", "gifski-wasm (in-browser)", gifskiGif, gifskiTime, !heroWins);
-      } else {
-        results.innerHTML = showCompare("benchResults", "gifhero", gifheroGif, gifheroTime, true) +
-          `<div class="compare-col"><h3>gifski-wasm</h3><div class="meta">Failed to run — check console for errors.</div></div>`;
+          showCompare("benchResults",
+            `gifhero — ${(gifheroGif.byteLength/1024).toFixed(0)} KB`,
+            gifheroGif, gifheroTime, heroSmaller) +
+          showCompare("benchResults",
+            `gifski-wasm — ${(gifskiGif.byteLength/1024).toFixed(0)} KB`,
+            gifskiGif, gifskiTime, !heroSmaller);
+
+      } catch (err) {
+        progress.textContent = `Error: ${err.message}`;
+        console.error("[benchmark] error:", err);
+        console.log("━━━ BENCHMARK END ━━━");
       }
 
       benchStart.disabled = false;
