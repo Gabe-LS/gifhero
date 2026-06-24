@@ -3,6 +3,9 @@ import type { EncodeOptions } from "../index.js";
 import type { FrameSource, GifProgress, GifRecorder } from "./types.js";
 import { EncoderWorker } from "./worker/worker-pool.js";
 
+function log(...args: any[]) { console.log(`[gifhero ${new Date().toISOString().slice(11, 23)}]`, ...args); }
+function warn(...args: any[]) { console.warn(`[gifhero ${new Date().toISOString().slice(11, 23)}]`, ...args); }
+
 export class GifHeroBuilder {
   private _source: FrameSource;
   private _fps = 10;
@@ -78,7 +81,7 @@ export class GifHeroBuilder {
   async toGif(): Promise<Uint8Array> {
     const signal = this._abortController.signal;
 
-    console.log("[gifhero] Extracting frames...");
+    log("Extracting frames...");
     const t0 = performance.now();
 
     const { frames, width, height } = await this._source.extract(
@@ -90,7 +93,7 @@ export class GifHeroBuilder {
           totalFrames: total,
         });
         if (extracted % 10 === 0 || extracted === total) {
-          console.log(`[gifhero] Extracted ${extracted}/${total} frames`);
+          log(`Extracted ${extracted}/${total} frames`);
         }
       },
       signal,
@@ -100,8 +103,8 @@ export class GifHeroBuilder {
 
     const extractMs = performance.now() - t0;
     const totalPixels = frames.length * width * height;
-    console.log(`[gifhero] Extraction done: ${frames.length} frames, ${width}×${height}, ${(extractMs / 1000).toFixed(1)}s`);
-    console.log(`[gifhero] Total pixel data: ${(totalPixels * 4 / 1024 / 1024).toFixed(1)} MB`);
+    log(`Extraction done: ${frames.length} frames, ${width}×${height}, ${(extractMs / 1000).toFixed(1)}s`);
+    log(`Total pixel data: ${(totalPixels * 4 / 1024 / 1024).toFixed(1)} MB`);
 
     this._onProgress?.({ phase: "encoding", progress: 0 });
 
@@ -120,7 +123,7 @@ export class GifHeroBuilder {
     const t1 = performance.now();
 
     if (this._useWorker) {
-      console.log("[gifhero] Starting Web Worker encoding...");
+      log("Starting Web Worker encoding...");
       try {
         const worker = new EncoderWorker();
         try {
@@ -128,21 +131,21 @@ export class GifHeroBuilder {
         } finally {
           worker.terminate();
         }
-        console.log(`[gifhero] Worker encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t1) / 1000).toFixed(1)}s`);
+        log(`Worker encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t1) / 1000).toFixed(1)}s`);
       } catch (err) {
-        console.warn("[gifhero] Worker failed, falling back to main thread:", (err as Error).message);
+        warn("Worker failed, falling back to main thread:", (err as Error).message);
         const t2 = performance.now();
         gif = await encode(options);
-        console.log(`[gifhero] Main thread encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t2) / 1000).toFixed(1)}s`);
+        log(`Main thread encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t2) / 1000).toFixed(1)}s`);
       }
     } else {
-      console.log("[gifhero] Starting main thread encoding...");
+      log("Starting main thread encoding...");
       gif = await encode(options);
-      console.log(`[gifhero] Main thread encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t1) / 1000).toFixed(1)}s`);
+      log(`Main thread encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB, ${((performance.now() - t1) / 1000).toFixed(1)}s`);
     }
 
     const totalMs = performance.now() - t0;
-    console.log(`[gifhero] Total: ${(totalMs / 1000).toFixed(1)}s (extract ${(extractMs / 1000).toFixed(1)}s + encode ${((totalMs - extractMs) / 1000).toFixed(1)}s)`);
+    log(`Total: ${(totalMs / 1000).toFixed(1)}s (extract ${(extractMs / 1000).toFixed(1)}s + encode ${((totalMs - extractMs) / 1000).toFixed(1)}s)`);
 
     this._onProgress?.({ phase: "encoding", progress: 1 });
     return gif;

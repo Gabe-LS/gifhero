@@ -11,13 +11,15 @@ interface EncodeRequest {
   options: Omit<EncodeOptions, "width" | "height" | "frames">;
 }
 
-console.log("[gifhero-worker] Worker loaded");
+function wlog(...args: any[]) { console.log(`[gifhero-worker ${new Date().toISOString().slice(11, 23)}]`, ...args); }
+
+wlog("Worker loaded");
 
 self.onmessage = async (e: MessageEvent<EncodeRequest>) => {
   const { type, id, frameBuffers, delays, width, height, options } = e.data;
   if (type !== "encode") return;
 
-  console.log(`[gifhero-worker] Received ${frameBuffers.length} frames (${width}×${height}), encoding...`);
+  wlog(`Received ${frameBuffers.length} frames (${width}×${height}), encoding...`);
   const t0 = performance.now();
 
   const frames: EncodeFrame[] = frameBuffers.map((buf, i) => ({
@@ -28,11 +30,11 @@ self.onmessage = async (e: MessageEvent<EncodeRequest>) => {
   try {
     const gif = await encode({ width, height, frames, ...options });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    console.log(`[gifhero-worker] Encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB in ${elapsed}s`);
+    wlog(`Encoding done: ${(gif.byteLength / 1024).toFixed(0)} KB in ${elapsed}s`);
     const buf = gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength);
     (self as unknown as Worker).postMessage({ type: "result", id, gif: buf }, [buf]);
   } catch (err) {
-    console.error("[gifhero-worker] Encoding failed:", (err as Error).message);
+    console.error(`[gifhero-worker ${new Date().toISOString().slice(11, 23)}] Encoding failed:`, (err as Error).message);
     (self as unknown as Worker).postMessage({ type: "error", id, message: (err as Error).message });
   }
 };
