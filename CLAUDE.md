@@ -165,8 +165,8 @@ reports/
 ## Presets
 
 ### quality
-Maximum VMAF, never >5% larger than gifski. Best for visual fidelity.
-- quantizer: imagequant (q90, speed 1)
+Maximum VMAF and minimal posterization. Best for visual fidelity.
+- quantizer: imagequant (q98, speed 1)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
 - staleThreshold: base 4, motionFloor 4/5
@@ -174,8 +174,8 @@ Maximum VMAF, never >5% larger than gifski. Best for visual fidelity.
 - No per-frame threshold boost
 
 ### balanced (default)
-Maximum compression. Best for file size.
-- quantizer: imagequant (q90, speed 1)
+Maximum compression with reduced posterization. Best for file size.
+- quantizer: imagequant (q95, speed 1)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
 - staleThreshold: base 5, per-frame boost (+1 on near-static frames)
@@ -230,32 +230,38 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 
 ## Results vs gifski (25 fixtures × 4 resolutions)
 
-### quality preset (VMAF-optimized)
+### quality preset (q98, VMAF-optimized)
 
 | Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
 |-----------|-----------|-----------|------------|------------|
-| **480p** | **12/25** | **23/25** | **+0.4** | **-14%** |
-| **360p** | **14/25** | **23/25** | **+0.7** | **-14%** |
-| **240p** | **18/25** | **24/25** | **+1.6** | **-13%** |
-| **160p** | **21/25** | **25/25** | **+2.5** | **-15%** |
+| **480p** | **15/25** | **16/25** | **+0.5** | **-7%** |
+| **360p** | **18/25** | **18/25** | **+1.0** | **-5%** |
+| **240p** | **22/25** | **17/25** | **+2.2** | **-4%** |
+| **160p** | **21/25** | **17/25** | **+3.0** | **-4%** |
 
-### balanced preset (size-optimized)
+### balanced preset (q95, size-optimized)
 
 | Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
 |-----------|-----------|-----------|------------|------------|
-| **480p** | **7/25** | **24/25** | **+0.0** | **-18%** |
-| **360p** | **7/25** | **24/25** | **+0.1** | **-19%** |
-| **240p** | **14/25** | **25/25** | **+1.0** | **-19%** |
-| **160p** | **17/25** | **25/25** | **+1.7** | **-19%** |
+| **480p** | **10/25** | **22/25** | **+0.1** | **-14%** |
+| **360p** | **11/25** | **23/25** | **+0.3** | **-14%** |
+| **240p** | **16/25** | **24/25** | **+1.3** | **-14%** |
+| **160p** | **18/25** | **24/25** | **+2.0** | **-14%** |
 
-**Zero cases >5% larger than gifski on either preset. Zero VMAF losses >2 points.**
+**Zero VMAF losses >2 points on either preset.**
 
 ## Current Phase
-Phase 8 complete. Two presets for different priorities:
-- **quality**: VMAF-optimized — lower staleThreshold (base 4), full maxColors, no per-frame boost, no denoiser
-- **balanced**: size-optimized — higher staleThreshold (base 5), adaptive maxColors (192 at ≥20K), per-frame threshold boost, noise-aware temporal denoiser (3-frame median, dual gate: sub-perceptual >5% AND motion >2%)
+Phase 9 complete. Two presets with reduced posterization:
+- **quality** (q98): maximum VMAF, 61 palette entries for grayscale content (was 26 at q90), lower staleThreshold, no denoiser
+- **balanced** (q95): maximum compression, 38 palette entries (was 26), higher staleThreshold, noise-aware temporal denoiser
 
-Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling.
+Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling, motion-adjusted staleThreshold.
+
+### Browser SDK
+- `gifhero/browser` entry point with fluent API: `gifhero.fromFile(file).fps(20).width(480).toGif()`
+- VideoDecoder + Mediabunny demuxer for fast video-to-GIF (10-50× faster than seek-based extraction)
+- Web Worker encoding, ImageBitmap frame storage, progress callbacks, cancellation
+- In-browser benchmark tool comparing gifhero vs gifski-wasm side by side
 
 ## Known Limitations
 - **Gradient banding on 256-color content**: smooth gradients across thousands of colors will always show some banding in GIF. Tested noise/grain injection, q100, and dithering variations — all trade 2-5x file size for marginal visual improvement. This is a GIF format ceiling (256 colors per frame), not an encoder limitation. gifski has the same issue.
