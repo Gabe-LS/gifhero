@@ -326,6 +326,26 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
   const opts = resolveOptions(options);
 
+  // ── Temporal denoise ──
+  // Skip for near-static content (< 2% motion) where there's no
+  // temporal noise to remove and denoising would hurt quality.
+  if (frames.length >= 3) {
+    const samplePixels = width * height;
+    let totalChanged = 0, totalChecked = 0;
+    const step = Math.max(1, Math.floor(frames.length / 6));
+    for (let f = step; f < frames.length; f += step) {
+      const a = frames[f].data, b = frames[f - 1].data;
+      for (let i = 0; i < samplePixels; i++) {
+        const si = i * 4;
+        if (Math.abs(a[si] - b[si]) > 5 || Math.abs(a[si+1] - b[si+1]) > 5 || Math.abs(a[si+2] - b[si+2]) > 5) totalChanged++;
+        totalChecked++;
+      }
+    }
+    if (totalChecked > 0 && totalChanged / totalChecked > 0.02) {
+      denoiseFrames(frames, width, height, 3);
+    }
+  }
+
   // ── Phase 0: Drop near-duplicate frames ──
 
   const dropThreshold = opts.optimize.dropThreshold;
@@ -1034,6 +1054,45 @@ function punchTransparentHoles(
   }
 
   return { indexedPixels: out, transparentIndex: tIdx, left: minX, top: minY, width: cw, height: ch };
+}
+
+function denoiseFrames(
+  frames: EncodeFrame[],
+  width: number,
+  height: number,
+  threshold: number = 5,
+): void {
+  const numPixels = width * height;
+  let prev2: Uint8ClampedArray = frames[0].data;
+  let prev1: Uint8ClampedArray = frames[1].data;
+
+  for (let f = 2; f < frames.length; f++) {
+    const curr = frames[f].data;
+    const out = new Uint8ClampedArray(curr);
+
+    for (let i = 0; i < numPixels; i++) {
+      const si = i * 4;
+      let maxDev = 0;
+      for (let c = 0; c < 3; c++) {
+        const a = curr[si + c], b = prev1[si + c], d = prev2[si + c];
+        const dev = Math.max(Math.abs(a - b), Math.abs(a - d), Math.abs(b - d));
+        if (dev > maxDev) maxDev = dev;
+      }
+
+      if (maxDev > 0 && maxDev <= threshold) {
+        for (let c = 0; c < 3; c++) {
+          const a = curr[si + c], b = prev1[si + c], d = prev2[si + c];
+          out[si + c] = a > b
+            ? (b > d ? b : (a > d ? d : a))
+            : (a > d ? a : (b > d ? d : b));
+        }
+      }
+    }
+
+    frames[f] = { data: out, delay: frames[f].delay };
+    prev2 = prev1;
+    prev1 = out;
+  }
 }
 
 function buildLzwEncoder(
