@@ -135,7 +135,7 @@ function configToOptions(c: SweepConfig): Omit<EncodeOptions, "width" | "height"
     probeTolerance: c.probeTolerance,
   };
   return {
-    preset: "quality",
+    preset: "balanced",
     quantizer: c.quantizer,
     quality: c.quantizer === "neuquant" ? c.neuquantQuality : undefined,
     imagequantQuality: c.imagequantQuality,

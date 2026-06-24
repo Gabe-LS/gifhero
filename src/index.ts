@@ -115,7 +115,7 @@ export interface EncodeOptions {
   /** One or more frames to encode. */
   frames: EncodeFrame[];
   /** Preset that sets defaults for all options. Individual options override preset values. */
-  preset?: "best" | "quality";
+  preset?: "quality" | "balanced";
   /** Quantizer algorithm. 'imagequant' requires the optional `imagequant` npm package. */
   quantizer?: "imagequant" | "neuquant";
   /** NeuQuant sampling quality 1–30 (1 = best, 30 = fastest). Only used when quantizer='neuquant'. */
@@ -183,7 +183,7 @@ interface ResolvedOptions {
 }
 
 const PRESETS: Record<string, ResolvedOptions> = {
-  best: {
+  quality: {
     quantizer: "imagequant",
     quantizerQuality: 90,
     quantizerSpeed: 1,
@@ -211,7 +211,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
       frameDiffDistanceMode: "max",
     },
   },
-  quality: {
+  balanced: {
     quantizer: "imagequant",
     quantizerQuality: 90,
     quantizerSpeed: 1,
@@ -242,7 +242,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
 };
 
 function resolveOptions(options: EncodeOptions): ResolvedOptions {
-  const base = PRESETS[options.preset ?? "quality"];
+  const base = PRESETS[options.preset ?? "balanced"];
 
   let userOpt: ResolvedOptimize;
   if (options.optimize === false) {
@@ -363,7 +363,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const presetName = options.preset ?? "quality";
+    const presetName = options.preset ?? "balanced";
     const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName);
 
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
@@ -400,7 +400,7 @@ async function encodeSubframePipeline(
   height: number,
   opts: ResolvedOptions,
   downscaleRatio: number = 1,
-  presetName: string = "quality",
+  presetName: string = "balanced",
 ): Promise<{ gifFrames: GifFrame[]; probe: ProbeResult }> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
@@ -426,13 +426,13 @@ async function encodeSubframePipeline(
   }
 
   // ── Shared palette + adaptive maxColors ──
-  // "best" preset: per-frame palettes at native res for maximum VMAF,
-  //   shared only when downscaling. No maxColors reduction.
-  // Other presets: shared palette when colorComplexity >= 8K at native
-  //   or always when downscaling. maxColors reduced to 192 at >= 20K.
-  const isBest = presetName === "best";
+  // "quality" preset: per-frame palettes at native res for maximum VMAF,
+  //   maxColors capped at 224 only for very high color diversity (>= 30K).
+  // "balanced" preset: shared palette when colorComplexity >= 8K at native,
+  //   maxColors reduced to 192 at >= 20K for better compression.
+  const isQuality = presetName === "quality";
   let sharedPalette: Uint8Array | null = null;
-  const adaptiveMaxColors = isBest
+  const adaptiveMaxColors = isQuality
     ? (probe.colorComplexity >= 30000 ? Math.min(opts.maxColors, 224) : opts.maxColors)
     : (probe.colorComplexity >= 20000 ? Math.min(opts.maxColors, 192) : opts.maxColors);
   if (useGifQuant && opts.palette !== "local" && (
@@ -495,7 +495,7 @@ async function encodeSubframePipeline(
   // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
   const complexity = probe.motionLevel * probe.colorComplexity;
   let autoThreshold: number;
-  if (isBest) {
+  if (isQuality) {
     const motionFloor = probe.motionLevel > 0.01 ? 5 : 4;
     autoThreshold = Math.min(10, Math.max(motionFloor,
       Math.round(4 + 6 * Math.min(1, complexity / 5000)),
@@ -505,7 +505,7 @@ async function encodeSubframePipeline(
       Math.round(5 + 5 * Math.min(1, complexity / 5000)),
     ));
   }
-  const staleThreshold = opts.optimize.staleThreshold !== (isBest ? 3 : 8)
+  const staleThreshold = opts.optimize.staleThreshold !== (isQuality ? 3 : 8)
     ? opts.optimize.staleThreshold
     : autoThreshold;
 
@@ -565,7 +565,7 @@ async function encodeSubframePipeline(
       // adaptive threshold. The quantizer handles edge blending
       // via set_background; this marks genuinely unchanged pixels.
       const fm = probe.perFrameMotion[i] ?? probe.motionLevel;
-      const frameThreshold = (!isBest && fm < 0.02)
+      const frameThreshold = (!isQuality && fm < 0.02)
         ? Math.min(10, staleThreshold + 1)
         : staleThreshold;
 

@@ -174,7 +174,7 @@ function generateScreencast() {
     "  width: 640,",
     "  height: 480,",
     "  frames: videoFrames,",
-    '  preset: "quality",',
+    '  preset: "balanced",',
     "});",
     "",
     "// Save the output",

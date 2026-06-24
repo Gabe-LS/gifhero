@@ -316,7 +316,7 @@ async function encodeAndMeasure(
     width: fixture.width,
     height: fixture.height,
     frames: fixture.frames,
-    preset: "quality",
+    preset: "balanced",
     ...options,
   };
 
@@ -602,7 +602,7 @@ async function runSweeps(
       allSeries.push({
         fixture: fixture.name,
         parameter: sweep.parameter,
-        baseline: { preset: "quality", imagequantQuality: 80, imagequantSpeed: 3, maxColors: 256, lossyLzw: 4, cropTolerance: 5, holeTolerance: 0 },
+        baseline: { preset: "balanced", imagequantQuality: 80, imagequantSpeed: 3, maxColors: 256, lossyLzw: 4, cropTolerance: 5, holeTolerance: 0 },
         results,
       });
     }

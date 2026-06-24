@@ -167,7 +167,7 @@ describe("presets", () => {
     );
     const frames = [{ data, delay: 0 }];
 
-    for (const preset of ["best", "quality"] as const) {
+    for (const preset of ["quality", "balanced"] as const) {
       const gif = await encode({ width, height, frames, preset, loop: -1 });
       expect(gif).toBeInstanceOf(Uint8Array);
       const sig = String.fromCharCode(...Array.from(gif.slice(0, 6)));

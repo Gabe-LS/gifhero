@@ -147,19 +147,19 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
       const { width, height, frames } = loadPngFrames(framesDir);
       const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
       writeFileSync(outputPath, await encode({
-        width, height, frames, preset: "quality",
+        width, height, frames, preset: "balanced",
         ...(tw ? { targetWidth: tw } : {}),
       }));
     },
   };
 
-  encoders[`gifhero-best${suffix}`] = {
+  encoders[`gifhero-quality${suffix}`] = {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
       const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
       writeFileSync(outputPath, await encode({
-        width, height, frames, preset: "best",
+        width, height, frames, preset: "quality",
         ...(tw ? { targetWidth: tw } : {}),
       }));
     },
@@ -752,7 +752,7 @@ const FAST_FIXTURES = new Set([
   "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
 const FAST_ENCODERS = new Set(
-  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero${suffix}`, `gifhero-best${suffix}`]),
+  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero${suffix}`, `gifhero-quality${suffix}`]),
 );
 
 // ─────────────────────────────────────────────
@@ -837,9 +837,9 @@ async function main() {
         const loaded = loadPngFrames(framesDir);
 
         for (const encoderName of gifheroEncoderNames) {
-          const isBest = encoderName.startsWith("gifhero-best");
-          const suffix = isBest
-            ? encoderName.replace("gifhero-best", "")
+          const isQualityPreset = encoderName.startsWith("gifhero-quality");
+          const suffix = isQualityPreset
+            ? encoderName.replace("gifhero-quality", "")
             : encoderName.replace("gifhero", "");
           const res = RESOLUTIONS.find((r) => r.suffix === suffix);
           const tw = res?.targetWidth && res.targetWidth < loaded.width
@@ -849,7 +849,7 @@ async function main() {
             frames: loaded.frames.map((f) => ({ data: f.data, delay: f.delay })),
             width: loaded.width, height: loaded.height,
             options: {
-              preset: (isBest ? "best" : "quality") as any,
+              preset: (isQualityPreset ? "quality" : "balanced") as any,
               ...(tw ? { targetWidth: tw } : {}),
             },
           });
