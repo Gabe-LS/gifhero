@@ -326,10 +326,12 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
   const opts = resolveOptions(options);
 
-  // ── Temporal denoise ──
-  // Skip for near-static content (< 2% motion) where there's no
-  // temporal noise to remove and denoising would hurt quality.
-  if (frames.length >= 3) {
+  // ── Temporal denoise (balanced preset only) ──
+  // Smooths temporal noise for better compression. Skipped for the
+  // quality preset (which prioritizes VMAF) and for near-static
+  // content (< 2% motion) where there's no noise to remove.
+  const presetName = options.preset ?? "balanced";
+  if (presetName === "balanced" && frames.length >= 3) {
     const samplePixels = width * height;
     let totalChanged = 0, totalChecked = 0;
     const step = Math.max(1, Math.floor(frames.length / 6));
@@ -383,7 +385,6 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const presetName = options.preset ?? "balanced";
     const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName);
 
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
