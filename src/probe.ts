@@ -121,9 +121,10 @@ export function probeFrames(
   // at motion-to-static transitions (high-motion frame followed by
   // low-motion frames — the canvas carries stale quantization error).
 
+  const sceneThreshold = 0.6;
   const sceneChanges: number[] = [];
   for (let f = 1; f < frames.length; f++) {
-    if (perFrameMotion[f] > 0.6) {
+    if (perFrameMotion[f] > sceneThreshold) {
       sceneChanges.push(f);
     } else if (f >= 2 && perFrameMotion[f] < 0.02 && perFrameMotion[f - 1] > 0.15) {
       sceneChanges.push(f);

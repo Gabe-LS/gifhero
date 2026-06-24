@@ -2,7 +2,7 @@
 
 ## What This Is
 A TypeScript GIF encoding library targeting the browser (Chrome extensions, web apps).
-Zero cases >10% larger than gifski across 200 encodes (25 fixtures × 4 resolutions). Wins VMAF at every resolution.
+Zero cases >5% larger than gifski across 200 encodes (25 fixtures × 4 resolutions). Wins VMAF at every resolution.
 
 ## Tech Stack
 - TypeScript (strict mode), targeting ES2020
@@ -47,12 +47,16 @@ Source frames
   → Lanczos3 downscale (if targetWidth set)
   → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
-      complexity = motionLevel × colorComplexity
-      autoThreshold = clamp(5, 10, round(5 + 5 × min(1, complexity / 5000)))
+      quality: base 4, motionFloor 4/5
+      balanced: base 5, per-frame boost (+1 on near-static frames)
   → Content-adaptive lossyLzw:
       adaptiveLzw = clamp(preset, 5, round(preset + complexity / 3000))
-  → Adaptive maxColors: 192 when colorComplexity ≥ 20000, else 256
+  → Adaptive maxColors:
+      quality: 224 when colorComplexity ≥ 30K
+      balanced: 192 when colorComplexity ≥ 20K
   → Shared palette via Histogram (if downscaling OR colorComplexity ≥ 8000)
+  → Deferred LZW clear code (continue matching when dictionary full)
+  → Power-of-2 palette targeting (evict entries to cross bit boundary)
   → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
   → Frames 1+:
       1. Zero alpha on static-mask pixels
@@ -141,37 +145,39 @@ packages/
     └── src/lib.rs
 
 test/bench/
-├── run.ts                      Benchmark runner (25 fixtures × 4 resolutions × 2 encoders)
+├── run.ts                      Benchmark runner (25 fixtures × 4 resolutions × 3 encoders)
 ├── parallel.ts                 Worker-thread parallel encoding (6× speedup)
 ├── encode-worker.ts            Worker script for parallel encoding
 ├── sensitivity.ts              Parameter sensitivity analysis
 ├── sweep-exhaustive.ts         Full parameter grid sweep
 ├── REPORT.md                   Full benchmark report vs gifski
 └── references/                 Saved GIF outputs for visual comparison
+
+reports/
+├── compression-optimization-tests.md    Tests from lossyLzw≤5 investigation
+└── compression-report-strategies-test.md Tests of external compression strategies
 ```
 
 ## Presets
 
-### quality (default)
-Best visual quality. Background-aware imagequant at maximum precision.
+### quality
+Maximum VMAF, never >5% larger than gifski. Best for visual fidelity.
 - quantizer: imagequant (q90, speed 1)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
-- optimize: subframe, content-adaptive staleThreshold, keyframe detection, adaptive maxColors
+- staleThreshold: base 4, motionFloor 4/5
+- maxColors: 256 (224 when colorComplexity ≥ 30K)
+- No per-frame threshold boost
 
-### balanced
-Good quality with smaller files.
-- quantizer: imagequant (q80, speed 3)
+### balanced (default)
+Maximum compression. Best for file size.
+- quantizer: imagequant (q90, speed 1)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
-- optimize: subframe, content-adaptive staleThreshold, keyframe detection, adaptive maxColors
+- staleThreshold: base 5, per-frame boost (+1 on near-static frames)
+- maxColors: 256 (192 when colorComplexity ≥ 20K)
 
-### speed
-Fastest encoding. Uses NeuQuant instead of imagequant WASM.
-- quantizer: neuquant (quality 20)
-- dither: floyd-steinberg (serpentine)
-- lossyLzw: 0
-- optimize: subframe, content-adaptive staleThreshold, keyframe detection
+Both presets share: conditional shared palette (colorComplexity ≥ 8K or downscaling), keyframe detection, Lanczos3 downscaling, deferred LZW clear, power-of-2 palette targeting.
 
 ## Encode Options
 
@@ -217,20 +223,31 @@ RUSTFLAGS="-C target-feature=+bulk-memory,+nontrapping-fptoint" \
 ### Parallel encoding
 Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own V8 isolate and WASM instance. Achieves 6× speedup on 16 cores.
 
-## Results vs gifski (200 encodes, 25 fixtures × 4 resolutions)
+## Results vs gifski (25 fixtures × 4 resolutions)
+
+### quality preset (VMAF-optimized)
+
+| Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
+|-----------|-----------|-----------|------------|------------|
+| **480p** | **12/25** | **23/25** | **+0.4** | **-14%** |
+| **360p** | **14/25** | **23/25** | **+0.7** | **-14%** |
+| **240p** | **18/25** | **24/25** | **+1.6** | **-13%** |
+| **160p** | **21/25** | **25/25** | **+2.5** | **-15%** |
+
+### balanced preset (size-optimized)
 
 | Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
 |-----------|-----------|-----------|------------|------------|
 | **480p** | **9/25** | **24/25** | **+0.3** | **-16%** |
-| **360p** | **12/25** | **24/25** | **+0.5** | **-16%** |
-| **240p** | **15/25** | **25/25** | **+1.4** | **-17%** |
-| **160p** | **20/25** | **25/25** | **+2.3** | **-17%** |
+| **360p** | **10/25** | **24/25** | **+0.4** | **-16%** |
+| **240p** | **15/25** | **25/25** | **+1.3** | **-18%** |
+| **160p** | **18/25** | **25/25** | **+2.1** | **-17%** |
 
-**Zero cases >10% larger than gifski. Zero cases >5% larger. Zero VMAF losses >2 points.**
+**Zero cases >5% larger than gifski on either preset. Zero VMAF losses >2 points.**
 
 ## Current Phase
-Phase 6 complete. Four content-adaptive optimizations reduce file size without relying on aggressive lossy LZW:
-1. Raised staleThreshold base to 5 (`round(5 + 5 × min(1, c/5000))`), eliminating motion floor — 2-3% savings across the board
-2. Conditional shared palette (colorComplexity ≥ 8000 at native res, always when downscaling) for cross-frame LZW consistency
-3. Adaptive maxColors (192 when colorComplexity ≥ 20000) to reduce dithering noise on high-diversity content
-4. Adaptive lossyLzw capped at 5 (not 6) from probe motion × color complexity
+Phase 7 complete. Two presets for different priorities:
+- **quality**: VMAF-optimized with lower staleThreshold (base 4), full maxColors, no per-frame boost
+- **balanced**: size-optimized with higher staleThreshold (base 5), adaptive maxColors (192 at ≥20K), per-frame threshold boost
+
+Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling.

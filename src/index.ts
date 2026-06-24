@@ -432,9 +432,13 @@ async function encodeSubframePipeline(
   //   maxColors reduced to 192 at >= 20K for better compression.
   const isQuality = presetName === "quality";
   let sharedPalette: Uint8Array | null = null;
-  const adaptiveMaxColors = isQuality
-    ? (probe.colorComplexity >= 30000 ? Math.min(opts.maxColors, 224) : opts.maxColors)
-    : (probe.colorComplexity >= 20000 ? Math.min(opts.maxColors, 192) : opts.maxColors);
+
+  let adaptiveMaxColors = opts.maxColors;
+  if (!isQuality && probe.colorComplexity >= 20000) {
+    adaptiveMaxColors = Math.min(adaptiveMaxColors, 192);
+  } else if (isQuality && probe.colorComplexity >= 30000) {
+    adaptiveMaxColors = Math.min(adaptiveMaxColors, 224);
+  }
   if (useGifQuant && opts.palette !== "local" && (
     downscaleRatio > 1.0 ||
     opts.palette === "global" ||
