@@ -54,6 +54,7 @@
   "license": "MIT",
   "devDependencies": {
     "canvas": "^3.1.0",
+    "gifski-wasm": "^2.2.0",
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
