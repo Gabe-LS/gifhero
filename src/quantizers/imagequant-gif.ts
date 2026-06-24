@@ -9,17 +9,12 @@
  * @module
  */
 
-import { createRequire } from "module";
+import * as wasmModule from "../wasm/imagequant-gif/imagequant-gif-wasm.js";
 
-// ── Lazy WASM module loading ────────────────────────────────────
+// ── WASM module accessor ──────────────────────────────────────
 
-let mod: any = null;
-
-function getMod(): any {
-  if (mod) return mod;
-  const require = createRequire(import.meta.url);
-  mod = require("../wasm/imagequant-gif/imagequant_gif_wasm.js");
-  return mod;
+function getMod(): typeof wasmModule {
+  return wasmModule;
 }
 
 // ── Public API ──────────────────────────────────────────────────

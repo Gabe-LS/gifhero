@@ -5,7 +5,17 @@
  */
 
 import { neuquant } from "./quantizers/index.js";
-import { quantizeImagequant } from "./quantizers/imagequant.js";
+// Lazy import — imagequant.ts uses Node.js APIs (fs, zlib) that
+// aren't available in browsers. Only loaded when the fallback
+// npm imagequant package is actually needed.
+let _quantizeImagequant: typeof import("./quantizers/imagequant.js").quantizeImagequant | null = null;
+async function getQuantizeImagequant() {
+  if (!_quantizeImagequant) {
+    const m = await import("./quantizers/imagequant.js");
+    _quantizeImagequant = m.quantizeImagequant;
+  }
+  return _quantizeImagequant;
+}
 import { floydSteinberg, mapNearest } from "./dither/index.js";
 import { ditherFrameTemporal } from "./dither/temporal.js";
 import type { TemporalDitherState } from "./dither/temporal.js";
@@ -46,7 +56,7 @@ export { downsample, resizeFrames } from "./resize.js";
 
 export { writeGif, lzwEncode, lzwEncodeLossy } from "./encoder/index.js";
 export type { GifFrame, GifWriterOptions } from "./encoder/index.js";
-export { neuquant, quantizeImagequant } from "./quantizers/index.js";
+export { neuquant } from "./quantizers/index.js";
 export type { ImagequantOptions } from "./quantizers/index.js";
 export { floydSteinberg, mapNearest } from "./dither/index.js";
 export { ditherFrameTemporal } from "./dither/temporal.js";
@@ -506,7 +516,7 @@ async function encodeSubframePipeline(
       const pooled = new Uint8ClampedArray(poolSize);
       let off = 0;
       for (const p of parts) { pooled.set(p, off); off += p.length; }
-      const poolResult = await quantizeImagequant(
+      const poolResult = await (await getQuantizeImagequant())(
         pooled, width, (poolSize / 4) / width,
         { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
       );
@@ -728,7 +738,7 @@ async function encodeSubframePipeline(
     } else {
       const cropped = cropRgba(curr, width, bbox.minX, bbox.minY, cw, ch);
       if (opts.quantizer === "imagequant") {
-        const iqResult = await quantizeImagequant(cropped, cw, ch, {
+        const iqResult = await (await getQuantizeImagequant())(cropped, cw, ch, {
           quality: opts.quantizerQuality,
           speed: opts.quantizerSpeed,
           maxColors: opts.maxColors,
@@ -795,7 +805,7 @@ async function quantizeFrame(
 ): Promise<{ indexed: Uint8Array; palette: Uint8Array }> {
   if (opts.quantizer === "imagequant") {
     try {
-      const result = await quantizeImagequant(rgba, w, h, {
+      const result = await (await getQuantizeImagequant())(rgba, w, h, {
         quality: opts.quantizerQuality,
         speed: opts.quantizerSpeed,
         maxColors: opts.maxColors,
@@ -842,7 +852,7 @@ async function encodeLegacyPipeline(
 
   if (opts.quantizer === "imagequant") {
     for (let i = 0; i < frames.length; i++) {
-      const result = await quantizeImagequant(
+      const result = await (await getQuantizeImagequant())(
         frames[i].data, width, height,
         { quality: opts.quantizerQuality, speed: opts.quantizerSpeed, maxColors: opts.maxColors },
       );

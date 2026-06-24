@@ -326,8 +326,35 @@ function decodeText(ptr, len) {
 
 let WASM_VECTOR_LEN = 0;
 
-const wasmPath = `${__dirname}/imagequant_gif_wasm_bg.wasm`;
-const wasmBytes = require('fs').readFileSync(wasmPath);
-const wasmModule = new WebAssembly.Module(wasmBytes);
-let wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
-let wasm = wasmInstance.exports;
+// Universal WASM loading: base64-embedded, works in Node.js + browsers + workers
+let wasm;
+
+function _initWasm(bytes) {
+    const wasmModule = new WebAssembly.Module(bytes);
+    const wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
+    wasm = wasmInstance.exports;
+}
+
+function _ensureWasm() {
+    if (wasm) return;
+    // Try Node.js fs first (faster, avoids base64 decode)
+    try {
+        const fs = typeof require === 'function' && require('fs');
+        const path = typeof require === 'function' && require('path');
+        if (fs && path && typeof __dirname !== 'undefined') {
+            const wasmPath = path.join(__dirname, 'imagequant_gif_wasm_bg.wasm');
+            _initWasm(fs.readFileSync(wasmPath));
+            return;
+        }
+    } catch (_) { /* not Node.js */ }
+    // Fallback: decode base64-embedded WASM
+    const { wasmBase64 } = require('./imagequant_gif_wasm_bg.b64.js');
+    const binaryString = typeof atob === 'function'
+        ? atob(wasmBase64)
+        : Buffer.from(wasmBase64, 'base64').toString('binary');
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+    _initWasm(bytes);
+}
+
+_ensureWasm();
