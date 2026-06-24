@@ -336,8 +336,7 @@ pub fn encode(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> {
 // ── Shared helpers for both sequential and parallel paths ────────
 
 struct PipelineParams {
-    width: usize,
-    height: usize,
+    #[allow(dead_code)]
     is_quality: bool,
     preset_quality: u8,
     speed: i32,
@@ -383,8 +382,6 @@ fn compute_pipeline_params(
     });
 
     PipelineParams {
-        width: 0, // filled by caller
-        height: 0,
         is_quality,
         preset_quality,
         speed,
@@ -392,43 +389,6 @@ fn compute_pipeline_params(
         stale_threshold,
         adaptive_lzw,
     }
-}
-
-fn prepare_input_rgba(
-    frame: &[u8],
-    static_mask: &[u8],
-    canvas: &[u8],
-    per_frame_motion: f64,
-    is_quality: bool,
-    stale_threshold: u8,
-    num_pixels: usize,
-) -> Vec<u8> {
-    let mut input = frame.to_vec();
-
-    for j in 0..num_pixels {
-        if static_mask[j] != 0 {
-            input[j * 4 + 3] = 0;
-        }
-    }
-
-    let frame_threshold = if !is_quality && per_frame_motion < 0.02 {
-        (stale_threshold as u16 + 1).min(10) as u8
-    } else {
-        stale_threshold
-    };
-
-    for j in 0..num_pixels {
-        if input[j * 4 + 3] == 0 { continue; }
-        let si = j * 4;
-        let d = (input[si] as i16 - canvas[si] as i16).abs()
-            .max((input[si+1] as i16 - canvas[si+1] as i16).abs())
-            .max((input[si+2] as i16 - canvas[si+2] as i16).abs());
-        if d <= frame_threshold as i16 {
-            input[si + 3] = 0;
-        }
-    }
-
-    input
 }
 
 fn lzw_encode_frame(frame: &GifFrame, adaptive_lzw: u8) -> Vec<u8> {
@@ -446,6 +406,9 @@ fn lzw_encode_frame(frame: &GifFrame, adaptive_lzw: u8) -> Vec<u8> {
 
 // ── Parallel encode ─────────────────────────────────────────────
 
+/// Parallel encode using Rayon. Same output quality as encode(),
+/// with multi-core speedup on Lanczos3 downscaling and LZW encoding.
+/// Quantization and sub-frame pass remain sequential (canvas dependency).
 #[cfg(feature = "cli")]
 pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> {
     use rayon::prelude::*;
@@ -456,6 +419,7 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
 
     let mut width = opts.width;
     let mut height = opts.height;
+    let src_width = width;
 
     let delays: Vec<u16> = frames.iter().map(|f| f.delay).collect();
 
@@ -476,11 +440,12 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
     } else {
         frames.iter().map(|f| f.data.clone()).collect()
     };
+    let _downscale_ratio = src_width as f64 / width as f64;
 
     let is_quality = opts.preset == Preset::Quality;
     let num_pixels = width * height;
 
-    // ── 2. Sequential denoise (balanced only) ──
+    // ── 2. Sequential denoise ──
     if !is_quality && frame_data.len() >= 3 {
         let step = (frame_data.len() / 6).max(1);
         let mut sub_perceptual = 0usize;
@@ -514,12 +479,10 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
     let refs: Vec<&[u8]> = frame_data.iter().map(|f| f.as_slice()).collect();
     let probe_result = probe_frames(&refs, width, height, 3);
 
-    // ── 4. Compute adaptive parameters ──
-    let mut params = compute_pipeline_params(&probe_result, opts, is_quality);
-    params.width = width;
-    params.height = height;
+    // ── 4. Adaptive parameters ──
+    let params = compute_pipeline_params(&probe_result, opts, is_quality);
 
-    // ── 5. Sequential shared palette build ──
+    // ── 5. Shared palette ──
     let use_shared = opts.target_width.is_some() || probe_result.color_complexity >= 8000;
     let shared_palette: Option<Vec<u8>> = if use_shared {
         let step = (frame_data.len() / 10).max(1);
@@ -545,69 +508,23 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
     let scene_changes: std::collections::HashSet<usize> =
         probe_result.keyframes.iter().copied().collect();
 
-    // ── 6. Pre-compute approximate canvases for parallel quantization ──
-    let mut approx_canvases: Vec<Vec<u8>> = Vec::with_capacity(frame_data.len());
-    approx_canvases.push(vec![0u8; num_pixels * 4]); // frame 0: empty
-    for i in 1..frame_data.len() {
-        if scene_changes.contains(&i) {
-            approx_canvases.push(vec![0u8; num_pixels * 4]);
-        } else {
-            approx_canvases.push(frame_data[i - 1].clone());
-        }
-    }
-
-    // ── 7. Parallel quantization ──
-    let quant_results: Vec<quantize::QuantResult> = (0..frame_data.len()).into_par_iter()
-        .map(|i| {
-            if i == 0 || scene_changes.contains(&i) {
-                quantize_simple(
-                    &frame_data[i], width, height,
-                    0, params.preset_quality, params.speed, params.adaptive_max_colors,
-                )
-            } else {
-                let fm = if i < probe_result.per_frame_motion.len() {
-                    probe_result.per_frame_motion[i]
-                } else {
-                    probe_result.motion_level
-                };
-                let input = prepare_input_rgba(
-                    &frame_data[i],
-                    &probe_result.static_mask,
-                    &approx_canvases[i],
-                    fm,
-                    params.is_quality,
-                    params.stale_threshold,
-                    num_pixels,
-                );
-                if let Some(ref sp) = shared_palette {
-                    remap_with_palette(&input, width, height, sp, &approx_canvases[i], 1.0)
-                } else {
-                    quantize_with_background(
-                        &input, width, height,
-                        &approx_canvases[i], &importance_map,
-                        0, params.preset_quality, params.speed, params.adaptive_max_colors,
-                    )
-                }
-            }
-        })
-        .collect();
-
-    // Free approximate canvases — no longer needed
-    drop(approx_canvases);
-
-    // ── 8. Sequential sub-frame pass ──
+    // ── 6. Sequential quantize + sub-frame (canvas dependency) ──
     let mut gif_frames: Vec<GifFrame> = Vec::with_capacity(frame_data.len());
     let mut canvas = vec![0u8; num_pixels * 4];
     let mut prev_palette_rgb: Vec<u8> = Vec::new();
 
     for i in 0..frame_data.len() {
         let delay_ms = delays[i];
-        let r = &quant_results[i];
 
         if i == 0 || scene_changes.contains(&i) {
             if i > 0 {
                 canvas.fill(0);
             }
+
+            let r = quantize_simple(
+                &frame_data[i], width, height,
+                0, params.preset_quality, params.speed, params.adaptive_max_colors,
+            );
 
             let rgb_pal = rgba_to_rgb_palette(&r.palette, r.palette_count);
             let trimmed = trim_palette(&rgb_pal, &r.indexed, -1);
@@ -622,12 +539,51 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
                 transparent_index: -1,
                 delay: delay_ms,
                 x: 0, y: 0,
-                width: width as u16,
-                height: height as u16,
+                width: width as u16, height: height as u16,
                 disposal: 0,
             });
             continue;
         }
+
+        let mut input_rgba = frame_data[i].clone();
+
+        for j in 0..num_pixels {
+            if probe_result.static_mask[j] != 0 {
+                input_rgba[j * 4 + 3] = 0;
+            }
+        }
+
+        let fm = if i < probe_result.per_frame_motion.len() {
+            probe_result.per_frame_motion[i]
+        } else {
+            probe_result.motion_level
+        };
+        let frame_threshold = if !is_quality && fm < 0.02 {
+            (params.stale_threshold as u16 + 1).min(10) as u8
+        } else {
+            params.stale_threshold
+        };
+
+        for j in 0..num_pixels {
+            if input_rgba[j * 4 + 3] == 0 { continue; }
+            let si = j * 4;
+            let d = (input_rgba[si] as i16 - canvas[si] as i16).abs()
+                .max((input_rgba[si+1] as i16 - canvas[si+1] as i16).abs())
+                .max((input_rgba[si+2] as i16 - canvas[si+2] as i16).abs());
+            if d <= frame_threshold as i16 {
+                input_rgba[si + 3] = 0;
+            }
+        }
+
+        let r = if let Some(ref sp) = shared_palette {
+            remap_with_palette(&input_rgba, width, height, sp, &canvas, 1.0)
+        } else {
+            quantize_with_background(
+                &input_rgba, width, height,
+                &canvas, &importance_map,
+                0, params.preset_quality, params.speed, params.adaptive_max_colors,
+            )
+        };
 
         let t_idx = r.transparent_index;
         let bbox = find_changed_bbox(&r.indexed, width, height, t_idx);
@@ -676,7 +632,6 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
             }
         }
 
-        // Update canvas from FULL indexed
         for j in 0..num_pixels {
             if r.indexed[j] as i32 != t_idx {
                 let pi = r.indexed[j] as usize * 4;
@@ -689,11 +644,11 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
         }
     }
 
-    // ── 9. Parallel LZW encode ──
+    // ── 7. Parallel LZW encode ──
     let lzw_data: Vec<Vec<u8>> = gif_frames.par_iter()
         .map(|frame| lzw_encode_frame(frame, params.adaptive_lzw))
         .collect();
 
-    // ── 10. Sequential GIF assembly ──
+    // ── 8. Sequential GIF assembly ──
     write_gif(width as u16, height as u16, &gif_frames, &lzw_data)
 }

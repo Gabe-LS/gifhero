@@ -1,4 +1,4 @@
-use gifhero_core::{encode, EncodeFrame, EncodeOptions, Preset};
+use gifhero_core::{encode, encode_parallel, EncodeFrame, EncodeOptions, Preset};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -54,13 +54,18 @@ fn load_frames(dir: &str, max_frames: usize) -> (Vec<Vec<u8>>, usize, usize) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: encode_test <frames_dir> <output.gif> [target_width]");
+        eprintln!("Usage: encode_test <frames_dir> <output.gif> [target_width] [--single]");
         std::process::exit(1);
     }
 
     let frames_dir = &args[1];
     let output_path = &args[2];
-    let target_width: Option<usize> = args.get(3).and_then(|s| s.parse().ok());
+    let single_threaded = args.iter().any(|a| a == "--single");
+
+    let target_width: Option<usize> = args.iter()
+        .filter(|a| *a != "--single")
+        .nth(3)
+        .and_then(|s| s.parse().ok());
 
     let (raw_frames, width, height) = load_frames(frames_dir, 100);
     eprintln!("Loaded {} frames ({}x{})", raw_frames.len(), width, height);
@@ -81,12 +86,20 @@ fn main() {
         stale_threshold: None,
     };
 
+    let num_threads = rayon::current_num_threads();
+    let mode = if single_threaded { "single-threaded" } else { &format!("parallel ({num_threads} threads)") };
+    eprintln!("Mode: {mode}");
+
     let start = Instant::now();
-    let gif = encode(&frames, &opts);
+    let gif = if single_threaded {
+        encode(&frames, &opts)
+    } else {
+        encode_parallel(&frames, &opts)
+    };
     let elapsed = start.elapsed();
 
     std::fs::write(output_path, &gif).unwrap();
 
-    eprintln!("Encoded {} frames → {} bytes ({:.1} KB) in {:.2}s",
+    eprintln!("Encoded {} frames → {} bytes ({:.1} KB) in {:.3}s",
         frames.len(), gif.len(), gif.len() as f64 / 1024.0, elapsed.as_secs_f64());
 }
