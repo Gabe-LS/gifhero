@@ -9,8 +9,10 @@ Zero cases >5% larger than gifski across 200 encodes (25 fixtures × 4 resolutio
 - Build: tsup (ESM + CJS dual output)
 - Test: vitest
 - Custom libimagequant WASM with `set_background` / `set_importance_map` for native GIF transparency
+- WASM embedded as base64 — works in Node.js, browsers, workers, Chrome extensions (no fs/fetch needed)
 - Lanczos3 downscaling (pure JS, no DOM)
-- No runtime dependencies (WASM quantizer is an optional peer dep)
+- Zero Node-only APIs in the ESM bundle — no runtime dependencies
+- Bundle: 246KB ESM / 254KB CJS (self-contained, WASM included)
 
 ## Conventions
 - Pure functions where possible. No classes unless managing stateful resources (workers, WASM instances).
@@ -108,7 +110,7 @@ Rust crate wrapping libimagequant v4 with wasm-bindgen. Exposes:
 - `build_shared_palette()` — pools sampled frames via Histogram for multi-frame shared palette.
 - `remap_with_palette()` — remaps frame with pre-built palette + background awareness.
 
-Built with `wasm-pack --target nodejs --no-opt` (122KB WASM binary). Pre-built output checked into `src/wasm/imagequant-gif/`.
+Built with `wasm-pack --target nodejs --no-opt` (125KB WASM binary). The binary is embedded as base64 in `imagequant-gif-wasm.ts` for universal loading. The ESM glue replaces the wasm-pack CJS output to avoid Node-only APIs (`fs`, `createRequire`, `__dirname`).
 
 ### File structure
 
