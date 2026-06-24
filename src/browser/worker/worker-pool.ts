@@ -13,7 +13,7 @@ export class EncoderWorker {
 
   private getWorker(): Worker {
     if (this.worker) return this.worker;
-    const url = new URL("../browser-worker.js", import.meta.url);
+    const url = new URL("./browser-worker.js", import.meta.url);
     this.worker = new Worker(url, { type: "module" });
     return this.worker;
   }
