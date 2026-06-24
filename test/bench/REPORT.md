@@ -1,7 +1,8 @@
 # gifhero vs gifski — Full Benchmark Report
 
 **Date:** 2026-06-24
-**Fixtures:** 25 clips × 4 resolutions × 2 presets = 200 encodes per preset, compared to gifski
+**Commit:** a358c92
+**Fixtures:** 25 clips × 4 resolutions × 2 presets = 200 encodes per preset
 **gifski:** default settings (quality 90)
 
 ### gifhero presets
