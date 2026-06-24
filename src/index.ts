@@ -328,22 +328,32 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
 
   // ── Temporal denoise (balanced preset only) ──
   // Smooths temporal noise for better compression. Skipped for the
-  // quality preset (which prioritizes VMAF) and for near-static
-  // content (< 2% motion) where there's no noise to remove.
+  // quality preset (which prioritizes VMAF) and for clean sources
+  // (rendered, synthetic) that have no sensor/compression noise.
+  // Detection: sub-perceptual changes (1-2 per channel) are noise;
+  // anti-aliasing and intentional changes are 3+.
   const presetName = options.preset ?? "balanced";
   if (presetName === "balanced" && frames.length >= 3) {
-    const samplePixels = width * height;
-    let totalChanged = 0, totalChecked = 0;
+    const numPixels = width * height;
+    let subPerceptual = 0, changed = 0, totalChecked = 0;
     const step = Math.max(1, Math.floor(frames.length / 6));
     for (let f = step; f < frames.length; f += step) {
       const a = frames[f].data, b = frames[f - 1].data;
-      for (let i = 0; i < samplePixels; i++) {
+      for (let i = 0; i < numPixels; i++) {
         const si = i * 4;
-        if (Math.abs(a[si] - b[si]) > 5 || Math.abs(a[si+1] - b[si+1]) > 5 || Math.abs(a[si+2] - b[si+2]) > 5) totalChanged++;
+        const maxDev = Math.max(
+          Math.abs(a[si] - b[si]),
+          Math.abs(a[si+1] - b[si+1]),
+          Math.abs(a[si+2] - b[si+2]),
+        );
+        if (maxDev >= 1 && maxDev <= 2) subPerceptual++;
+        if (maxDev > 5) changed++;
         totalChecked++;
       }
     }
-    if (totalChecked > 0 && totalChanged / totalChecked > 0.02) {
+    const hasNoise = totalChecked > 0 && subPerceptual / totalChecked > 0.05;
+    const hasMotion = totalChecked > 0 && changed / totalChecked > 0.02;
+    if (hasNoise && hasMotion) {
       denoiseFrames(frames, width, height, 3);
     }
   }
