@@ -23,7 +23,7 @@ pub fn write_gif(
 
     write_u16_le(&mut buf, width);
     write_u16_le(&mut buf, height);
-    buf.push(0x00);
+    buf.push(0x70);
     buf.push(0);
     buf.push(0);
 
