@@ -45,6 +45,7 @@ Uses the custom `imagequant-gif` WASM module (`src/quantizers/imagequant-gif.ts`
 ```
 Source frames
   → Lanczos3 downscale (if targetWidth set)
+  → Temporal denoise (balanced only, noise-aware gate)
   → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
       quality: base 4, motionFloor 4/5
@@ -155,7 +156,8 @@ test/bench/
 
 reports/
 ├── compression-optimization-tests.md    Tests from lossyLzw≤5 investigation
-└── compression-report-strategies-test.md Tests of external compression strategies
+├── compression-report-strategies-test.md Tests of external compression strategies
+└── temporal-denoiser-investigation.md   Denoiser design, noise analysis, threshold tuning
 ```
 
 ## Presets
@@ -176,6 +178,7 @@ Maximum compression. Best for file size.
 - lossyLzw: 4 (adaptive up to 5)
 - staleThreshold: base 5, per-frame boost (+1 on near-static frames)
 - maxColors: 256 (192 when colorComplexity ≥ 20K)
+- Noise-aware temporal denoiser (3-frame median, threshold 3)
 
 Both presets share: conditional shared palette (colorComplexity ≥ 8K or downscaling), keyframe detection, Lanczos3 downscaling, deferred LZW clear, power-of-2 palette targeting.
 
@@ -238,16 +241,16 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 
 | Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
 |-----------|-----------|-----------|------------|------------|
-| **480p** | **9/25** | **24/25** | **+0.3** | **-16%** |
-| **360p** | **10/25** | **24/25** | **+0.4** | **-16%** |
-| **240p** | **15/25** | **25/25** | **+1.3** | **-18%** |
-| **160p** | **18/25** | **25/25** | **+2.1** | **-17%** |
+| **480p** | **7/25** | **24/25** | **+0.0** | **-18%** |
+| **360p** | **7/25** | **24/25** | **+0.1** | **-19%** |
+| **240p** | **14/25** | **25/25** | **+1.0** | **-19%** |
+| **160p** | **17/25** | **25/25** | **+1.7** | **-19%** |
 
 **Zero cases >5% larger than gifski on either preset. Zero VMAF losses >2 points.**
 
 ## Current Phase
-Phase 7 complete. Two presets for different priorities:
-- **quality**: VMAF-optimized with lower staleThreshold (base 4), full maxColors, no per-frame boost
-- **balanced**: size-optimized with higher staleThreshold (base 5), adaptive maxColors (192 at ≥20K), per-frame threshold boost
+Phase 8 complete. Two presets for different priorities:
+- **quality**: VMAF-optimized — lower staleThreshold (base 4), full maxColors, no per-frame boost, no denoiser
+- **balanced**: size-optimized — higher staleThreshold (base 5), adaptive maxColors (192 at ≥20K), per-frame threshold boost, noise-aware temporal denoiser (3-frame median, dual gate: sub-perceptual >5% AND motion >2%)
 
 Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling.
