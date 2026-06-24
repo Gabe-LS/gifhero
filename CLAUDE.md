@@ -254,3 +254,6 @@ Phase 8 complete. Two presets for different priorities:
 - **balanced**: size-optimized — higher staleThreshold (base 5), adaptive maxColors (192 at ≥20K), per-frame threshold boost, noise-aware temporal denoiser (3-frame median, dual gate: sub-perceptual >5% AND motion >2%)
 
 Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling.
+
+## Known Limitations
+- **Gradient banding on 256-color content**: smooth gradients across thousands of colors will always show some banding in GIF. Tested noise/grain injection, q100, and dithering variations — all trade 2-5x file size for marginal visual improvement. This is a GIF format ceiling (256 colors per frame), not an encoder limitation. gifski has the same issue.
