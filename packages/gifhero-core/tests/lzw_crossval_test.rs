@@ -47,17 +47,20 @@ fn crossval_large_repetitive_5000() {
     assert_eq!(hex, expected, "large-repetitive-5000");
 }
 
+fn make_rgb_palette_16() -> Vec<u8> {
+    let mut palette = vec![0u8; 16 * 3];
+    for i in 0..16 {
+        palette[i * 3] = (i * 16) as u8;
+        palette[i * 3 + 1] = (i * 16) as u8;
+        palette[i * 3 + 2] = (i * 16) as u8;
+    }
+    palette
+}
+
 #[test]
 fn crossval_lossy_zero() {
     let pixels: Vec<u8> = (0..100).map(|i| (i % 16) as u8).collect();
-    let mut palette = vec![0u8; 16 * 4];
-    for i in 0..16 {
-        palette[i * 4] = (i * 16) as u8;
-        palette[i * 4 + 1] = (i * 16) as u8;
-        palette[i * 4 + 2] = (i * 16) as u8;
-        palette[i * 4 + 3] = 255;
-    }
-
+    let palette = make_rgb_palette_16();
     let encoded = lzw_encode_lossy(&pixels, 4, &palette, 16, 0, -1);
     let expected = "10043148310725b558738f445998c679a0585dd9d67de1b4962e1a8facf9a632d99e305504";
     let hex = to_hex(&encoded);
@@ -67,14 +70,7 @@ fn crossval_lossy_zero() {
 #[test]
 fn crossval_lossy_20() {
     let pixels: Vec<u8> = (0..1000).map(|i| (i % 16) as u8).collect();
-    let mut palette = vec![0u8; 16 * 4];
-    for i in 0..16 {
-        palette[i * 4] = (i * 16) as u8;
-        palette[i * 4 + 1] = (i * 16) as u8;
-        palette[i * 4 + 2] = (i * 16) as u8;
-        palette[i * 4 + 3] = 255;
-    }
-
+    let palette = make_rgb_palette_16();
     let encoded = lzw_encode_lossy(&pixels, 4, &palette, 16, 20, -1);
     let expected = "10043148310725b558738f445998c679a0585dd9d67de1b4962e1a8facf9a632d99e30954f6713e66ac1de11c8c3d198b7d96f171d229b5262d2392d2a9f5423d8cbd562ad5071779bbd5697e1effa0c27b7d372f37bcc46c7cb6e6a7a828179858078887f778b7e768e7d75917c74947b73978386898c8f929598849c90a09a8a9e96a28d9f99879d93a19baba9b2a8b1a7b0a6afa011";
     let hex = to_hex(&encoded);
@@ -84,14 +80,7 @@ fn crossval_lossy_20() {
 #[test]
 fn crossval_lossy_5() {
     let pixels: Vec<u8> = (0..500).map(|i| (i % 8) as u8).collect();
-    let mut palette = vec![0u8; 16 * 4];
-    for i in 0..16 {
-        palette[i * 4] = (i * 16) as u8;
-        palette[i * 4 + 1] = (i * 16) as u8;
-        palette[i * 4 + 2] = (i * 16) as u8;
-        palette[i * 4 + 3] = 255;
-    }
-
+    let palette = make_rgb_palette_16();
     let encoded = lzw_encode_lossy(&pixels, 4, &palette, 16, 5, -1);
     let expected = "100431483147528b75bdd9f47522176ea067aa69d9a2247c8ef3eac6348bdbb25ebfb9db6f07e4057b429f32c9443a8f50a3b448255a87d8e5737ad546abd9e6b72be6ce22";
     let hex = to_hex(&encoded);

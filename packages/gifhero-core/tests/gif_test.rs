@@ -49,11 +49,7 @@ fn test_lzw_deferred_clear() {
 #[test]
 fn test_lzw_lossy_same_as_lossless_at_zero() {
     let pixels = vec![0u8, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
-    let mut palette = vec![0u8; 4 * 4];
-    palette[0] = 255; palette[1] = 0; palette[2] = 0; palette[3] = 255;
-    palette[4] = 0; palette[5] = 255; palette[6] = 0; palette[7] = 255;
-    palette[8] = 0; palette[9] = 0; palette[10] = 255; palette[11] = 255;
-    palette[12] = 128; palette[13] = 128; palette[14] = 128; palette[15] = 255;
+    let palette = vec![255u8, 0, 0, 0, 255, 0, 0, 0, 255, 128, 128, 128];
 
     let lossless = lzw_encode(&pixels, 2);
     let lossy = lzw_encode_lossy(&pixels, 2, &palette, 4, 0, -1);
@@ -67,12 +63,11 @@ fn test_lzw_lossy_smaller_than_lossless() {
         pixels.push((i % 16) as u8);
     }
 
-    let mut palette = vec![0u8; 16 * 4];
+    let mut palette = vec![0u8; 16 * 3];
     for i in 0..16 {
-        palette[i * 4] = (i * 16) as u8;
-        palette[i * 4 + 1] = (i * 16) as u8;
-        palette[i * 4 + 2] = (i * 16) as u8;
-        palette[i * 4 + 3] = 255;
+        palette[i * 3] = (i * 16) as u8;
+        palette[i * 3 + 1] = (i * 16) as u8;
+        palette[i * 3 + 2] = (i * 16) as u8;
     }
 
     let lossless = lzw_encode(&pixels, 4);

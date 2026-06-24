@@ -271,14 +271,14 @@ pub fn lzw_encode_lossy(
 fn build_dist_table(palette: &[u8], palette_count: usize) -> Vec<u8> {
     let mut dist = vec![0u8; 256 * 256];
     for i in 0..palette_count {
-        let ri = palette[i * 4] as i16;
-        let gi = palette[i * 4 + 1] as i16;
-        let bi = palette[i * 4 + 2] as i16;
+        let ri = palette[i * 3] as i16;
+        let gi = palette[i * 3 + 1] as i16;
+        let bi = palette[i * 3 + 2] as i16;
         for j in (i + 1)..palette_count {
-            let d = (ri - palette[j * 4] as i16)
+            let d = (ri - palette[j * 3] as i16)
                 .abs()
-                .max((gi - palette[j * 4 + 1] as i16).abs())
-                .max((bi - palette[j * 4 + 2] as i16).abs()) as u8;
+                .max((gi - palette[j * 3 + 1] as i16).abs())
+                .max((bi - palette[j * 3 + 2] as i16).abs()) as u8;
             dist[i * 256 + j] = d;
             dist[j * 256 + i] = d;
         }

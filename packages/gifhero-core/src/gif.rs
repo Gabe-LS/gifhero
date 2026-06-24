@@ -72,11 +72,12 @@ pub fn write_gif(
         write_u16_le(&mut buf, frame.height);
         buf.push(0x80 | color_table_bits as u8);
 
+        let stride = if frame.palette.len() == frame.palette_count * 4 { 4 } else { 3 };
         for j in 0..padded_size {
             if j < frame.palette_count {
-                buf.push(frame.palette[j * 4]);
-                buf.push(frame.palette[j * 4 + 1]);
-                buf.push(frame.palette[j * 4 + 2]);
+                buf.push(frame.palette[j * stride]);
+                buf.push(frame.palette[j * stride + 1]);
+                buf.push(frame.palette[j * stride + 2]);
             } else {
                 buf.push(0);
                 buf.push(0);
