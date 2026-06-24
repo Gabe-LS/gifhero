@@ -52,6 +52,27 @@
     </div>
   </div>
 
+  <!-- Test 1b: Video file via VideoDecoder (fromFile) -->
+  <h2>1b. Video File → GIF (VideoDecoder — fast path)</h2>
+  <div class="row">
+    <div class="panel">
+      <input type="file" id="videoFile2" accept="video/*">
+      <div class="controls">
+        <label>FPS <input type="number" id="videoFps2" value="10" min="1" max="30"></label>
+        <label>Width <input type="number" id="videoWidth2" value="320" min="60" max="1920"></label>
+        <label>Preset
+          <select id="videoPreset2">
+            <option value="balanced">balanced</option>
+            <option value="quality">quality</option>
+          </select>
+        </label>
+      </div>
+      <button id="videoEncode2" disabled>Encode GIF (VideoDecoder)</button>
+      <div class="progress" id="videoProgress2"></div>
+      <div class="result" id="videoResult2"></div>
+    </div>
+  </div>
+
   <!-- Test 2: Canvas drawing -->
   <h2>2. Canvas → GIF</h2>
   <div class="row">
@@ -152,6 +173,50 @@
         progress.textContent = `Error: ${err.message}`;
       }
       videoEncode.disabled = false;
+    });
+
+    // ── Test 1b: Video file via VideoDecoder ──
+    const videoFile2 = document.getElementById("videoFile2");
+    const videoEncode2 = document.getElementById("videoEncode2");
+
+    videoFile2.addEventListener("change", (e) => {
+      if (e.target.files[0]) videoEncode2.disabled = false;
+    });
+
+    videoEncode2.addEventListener("click", async () => {
+      videoEncode2.disabled = true;
+      const progress = document.getElementById("videoProgress2");
+      const file = videoFile2.files[0];
+      const fps = parseInt(document.getElementById("videoFps2").value) || 10;
+      const width = parseInt(document.getElementById("videoWidth2").value) || 320;
+      const preset = document.getElementById("videoPreset2").value;
+
+      progress.textContent = "Sending to worker...";
+      const t0 = performance.now();
+
+      try {
+        const gif = await gifhero
+          .fromFile(file)
+          .fps(fps)
+          .width(width)
+          .preset(preset)
+          .onProgress(p => {
+            if (p.phase === "extracting") {
+              progress.textContent = `Decoding: ${(p.progress * 100).toFixed(0)}%`;
+            } else {
+              progress.textContent = "Encoding...";
+            }
+          })
+          .toGif();
+
+        const elapsed = (performance.now() - t0) / 1000;
+        progress.textContent = `Done in ${elapsed.toFixed(1)}s`;
+        showResult("videoResult2", gif, elapsed);
+      } catch (err) {
+        progress.textContent = `Error: ${err.message}`;
+        console.error(err);
+      }
+      videoEncode2.disabled = false;
     });
 
     // ── Test 2: Canvas drawing ──

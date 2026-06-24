@@ -61,6 +61,7 @@
   },
   "dependencies": {
     "@squoosh-kit/imagequant": "^0.2.4",
-    "imagequant": "^0.1.2"
+    "imagequant": "^0.1.2",
+    "mediabunny": "^1.49.0"
   }
 }

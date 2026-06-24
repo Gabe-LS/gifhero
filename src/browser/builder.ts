@@ -1,13 +1,14 @@
 import { encode } from "../index.js";
 import type { EncodeOptions } from "../index.js";
 import type { FrameSource, GifProgress, GifRecorder } from "./types.js";
+import { FileSource } from "./sources/file.js";
 import { EncoderWorker } from "./worker/worker-pool.js";
 
 function log(...args: any[]) { console.log(`[gifhero ${new Date().toISOString().slice(11, 23)}]`, ...args); }
 function warn(...args: any[]) { console.warn(`[gifhero ${new Date().toISOString().slice(11, 23)}]`, ...args); }
 
 export class GifHeroBuilder {
-  private _source: FrameSource;
+  private _source: FrameSource | FileSource;
   private _fps = 10;
   private _targetWidth?: number;
   private _preset: "quality" | "balanced" = "balanced";
@@ -19,7 +20,7 @@ export class GifHeroBuilder {
   private _useWorker = true;
   private _abortController = new AbortController();
 
-  constructor(source: FrameSource) {
+  constructor(source: FrameSource | FileSource) {
     this._source = source;
   }
 
@@ -80,6 +81,11 @@ export class GifHeroBuilder {
   /** Encode and return the GIF as a Uint8Array. */
   async toGif(): Promise<Uint8Array> {
     const signal = this._abortController.signal;
+
+    // FileSource: full pipeline runs in the video worker
+    if (this._source instanceof FileSource) {
+      return this._encodeViaVideoWorker(signal);
+    }
 
     // Pass target width to source so extraction happens at target
     // resolution — avoids holding full-resolution frames in memory.
@@ -169,6 +175,59 @@ export class GifHeroBuilder {
 
     this._onProgress?.({ phase: "encoding", progress: 1 });
     return gif;
+  }
+
+  /** Full pipeline via video worker (demux + decode + probe + encode). */
+  private async _encodeViaVideoWorker(signal: AbortSignal): Promise<Uint8Array> {
+    const source = this._source as FileSource;
+    log("Reading file...");
+    const videoBuffer = await source.getBuffer();
+    log(`File read: ${(videoBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
+
+    signal.throwIfAborted();
+
+    const url = new URL("./video-worker.js", import.meta.url);
+    log("Creating video worker from:", url.href);
+    const worker = new Worker(url, { type: "module" });
+
+    return new Promise<Uint8Array>((resolve, reject) => {
+      worker.addEventListener("error", (e) => {
+        console.error(`[gifhero ${new Date().toISOString().slice(11, 23)}] Video worker error:`, e.message);
+        reject(new Error(e.message));
+      });
+
+      worker.addEventListener("message", (e: MessageEvent) => {
+        if (e.data.type === "progress") {
+          this._onProgress?.({
+            phase: e.data.phase,
+            progress: e.data.progress,
+          });
+        } else if (e.data.type === "result") {
+          log(`Received GIF from video worker: ${(e.data.gif.byteLength / 1024).toFixed(0)} KB`);
+          worker.terminate();
+          resolve(new Uint8Array(e.data.gif));
+        } else if (e.data.type === "error") {
+          worker.terminate();
+          reject(new Error(e.data.message));
+        }
+      });
+
+      worker.postMessage(
+        {
+          type: "encode-video",
+          id: 0,
+          videoBuffer,
+          fps: this._fps,
+          targetWidth: this._targetWidth,
+          preset: this._preset,
+          lossyLzw: this._lossyLzw,
+          maxColors: this._maxColors,
+          loop: this._loop,
+        },
+        [videoBuffer],
+      );
+      log("Video sent to worker");
+    });
   }
 
   /** Encode and return the GIF as a Blob. */

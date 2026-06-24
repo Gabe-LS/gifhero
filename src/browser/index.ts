@@ -40,6 +40,7 @@ import { CanvasSource } from "./sources/canvas.js";
 import { StreamSource } from "./sources/stream.js";
 import { FramesSource } from "./sources/frames.js";
 import { BlobSource } from "./sources/blob.js";
+import { FileSource } from "./sources/file.js";
 import type { VideoSourceOptions, StreamSourceOptions, CanvasSourceOptions } from "./types.js";
 
 /** Fluent entry points for creating GIFs from browser sources. */
@@ -110,5 +111,18 @@ export const gifhero = {
    */
   fromBlob(blob: Blob | File, options?: VideoSourceOptions): GifHeroBuilder {
     return new GifHeroBuilder(new BlobSource(blob, options));
+  },
+
+  /**
+   * Create a GIF from a video file using VideoDecoder (WebCodecs).
+   *
+   * The entire pipeline (demux, decode, probe, encode) runs in a
+   * Web Worker. No main thread blocking, O(1) memory, and 10-50×
+   * faster than seek-based extraction.
+   *
+   * @param file - A video File or Blob (MP4, WebM, MOV).
+   */
+  fromFile(file: File | Blob): GifHeroBuilder {
+    return new GifHeroBuilder(new FileSource(file));
   },
 };

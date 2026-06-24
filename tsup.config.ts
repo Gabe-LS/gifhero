@@ -22,4 +22,11 @@ export default defineConfig([
     external: ["fs", "module", "path", "zlib"],
     splitting: false,
   },
+  {
+    entry: { "video-worker": "src/browser/worker/video-worker.ts" },
+    format: ["esm"],
+    noExternal: [/.*/],
+    external: ["fs", "module", "path", "zlib"],
+    splitting: false,
+  },
 ]);

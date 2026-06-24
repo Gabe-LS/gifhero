@@ -35,7 +35,7 @@ import {
   countUsedColors,
 } from "./optimize/index.js";
 import type { PaletteStrategy } from "./optimize/index.js";
-import { probeFrames } from "./probe.js";
+import { probeFrames, IncrementalProbe } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { resizeFrames } from "./resize.js";
 import {
@@ -48,7 +48,7 @@ import type { GifQuantResult } from "./quantizers/imagequant-gif.js";
 
 export const VERSION = "0.0.1";
 
-export { probeFrames } from "./probe.js";
+export { probeFrames, IncrementalProbe } from "./probe.js";
 export type { ProbeResult } from "./probe.js";
 export { downsample, resizeFrames } from "./resize.js";
 
