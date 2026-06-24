@@ -584,6 +584,11 @@ async function encodeSubframePipeline(
       // Zero alpha on pixels where source ≈ canvas within the
       // adaptive threshold. The quantizer handles edge blending
       // via set_background; this marks genuinely unchanged pixels.
+      const fm = probe.perFrameMotion[i] ?? probe.motionLevel;
+      const frameThreshold = fm < 0.02
+        ? Math.min(10, staleThreshold + 1)
+        : staleThreshold;
+
       for (let j = 0; j < numPixels; j++) {
         if (inputRgba[j * 4 + 3] === 0) continue;
         const si = j * 4;
@@ -592,7 +597,7 @@ async function encodeSubframePipeline(
           Math.abs(inputRgba[si + 1] - canvasRgba[si + 1]),
           Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
         );
-        if (d <= staleThreshold) {
+        if (d <= frameThreshold) {
           inputRgba[si + 3] = 0;
         }
       }
