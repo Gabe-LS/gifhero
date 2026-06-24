@@ -195,7 +195,7 @@ interface ResolvedOptions {
 const PRESETS: Record<string, ResolvedOptions> = {
   quality: {
     quantizer: "imagequant",
-    quantizerQuality: 90,
+    quantizerQuality: 98,
     quantizerSpeed: 1,
     maxColors: 256,
     palette: "crossframe",
@@ -223,7 +223,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
   },
   balanced: {
     quantizer: "imagequant",
-    quantizerQuality: 90,
+    quantizerQuality: 95,
     quantizerSpeed: 1,
     maxColors: 256,
     palette: "crossframe",
