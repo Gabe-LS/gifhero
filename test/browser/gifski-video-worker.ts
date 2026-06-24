@@ -52,17 +52,31 @@ self.onmessage = async (e: MessageEvent<BenchRequest>) => {
     const srcH = decoderConfig.codedHeight ?? 0;
     const duration = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
 
-    // Compute target — same logic as gifhero: longest dimension
+    // Same snapped extraction as gifhero: 3× target, integer ratio,
+    // 15% tolerance. Both encoders get the same input frames.
     const longestSrc = Math.max(srcW, srcH);
-    const targetDim = targetWidth ?? longestSrc;
-    const scale = Math.min(1, targetDim / longestSrc);
-    const outW = Math.round(srcW * scale);
-    const outH = Math.round(srcH * scale);
+    let extractW = srcW;
+    let extractH = srcH;
+    let finalW = srcW;
+    let finalH = srcH;
+    if (targetWidth && targetWidth < longestSrc) {
+      const finalScale = Math.min(1, targetWidth / longestSrc);
+      finalW = Math.round(srcW * finalScale);
+      finalH = Math.round(srcH * finalScale);
+      const idealLong = targetWidth * 3;
+      if (longestSrc > idealLong * 1.15) {
+        const snapRatio = Math.round(longestSrc / idealLong);
+        if (snapRatio >= 2) {
+          extractW = Math.round(srcW / snapRatio);
+          extractH = Math.round(srcH / snapRatio);
+        }
+      }
+    }
 
-    wlog(`Demuxed: ${srcW}×${srcH} → ${outW}×${outH}, ${duration.toFixed(1)}s`);
+    wlog(`Demuxed: ${srcW}×${srcH} → extract ${extractW}×${extractH} → final ${finalW}×${finalH}, ${duration.toFixed(1)}s`);
 
-    // ── Decode + extract at target size ──
-    const canvas = new OffscreenCanvas(outW, outH);
+    // ── Decode + extract at snapped size ──
+    const canvas = new OffscreenCanvas(extractW, extractH);
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
     const sink = new VideoSampleSink(videoTrack);
     const frames: Uint8Array[] = [];
@@ -78,9 +92,9 @@ self.onmessage = async (e: MessageEvent<BenchRequest>) => {
 
       if (ts >= nextSampleTime) {
         const vf = sample.toVideoFrame();
-        ctx.drawImage(vf, 0, 0, outW, outH);
+        ctx.drawImage(vf, 0, 0, extractW, extractH);
         vf.close();
-        const imageData = ctx.getImageData(0, 0, outW, outH);
+        const imageData = ctx.getImageData(0, 0, extractW, extractH);
         frames.push(new Uint8Array(imageData.data.buffer));
         nextSampleTime = ts + interval;
 
@@ -97,15 +111,17 @@ self.onmessage = async (e: MessageEvent<BenchRequest>) => {
 
     // ── Encode with gifski-wasm ──
     (self as any).postMessage({ type: "progress", id, phase: "encoding", progress: 0 });
-    wlog(`Encoding ${frames.length} frames at ${outW}×${outH} q${quality}...`);
+    const needsResize = finalW < extractW;
+    wlog(`Encoding ${frames.length} frames at ${extractW}×${extractH}${needsResize ? ` → resize to ${finalW}` : ""} q${quality}...`);
     const t1 = performance.now();
 
     const gif = await encodeGifski({
       frames,
-      width: outW,
-      height: outH,
+      width: extractW,
+      height: extractH,
       fps,
       quality,
+      ...(needsResize ? { resizeWidth: finalW } : {}),
     });
 
     const encodeMs = performance.now() - t1;
