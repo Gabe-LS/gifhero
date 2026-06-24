@@ -7,7 +7,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
-    h1 { margin-bottom: 16px; font-size: 1.4rem; }
+    h1 { margin-bottom: 8px; font-size: 1.4rem; }
     h2 { margin: 24px 0 8px; font-size: 1.1rem; color: #7ecfff; }
     .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 16px; }
     .panel { background: #16213e; border-radius: 8px; padding: 16px; min-width: 300px; }
@@ -23,60 +23,41 @@
     label { display: block; margin-bottom: 4px; font-size: 0.85rem; }
     select, input[type="number"] { padding: 4px 8px; border-radius: 4px; border: 1px solid #333; background: #0a0a1a; color: #e0e0e0; width: 80px; }
     .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .compare { display: flex; gap: 24px; flex-wrap: wrap; }
+    .compare-col { flex: 1; min-width: 240px; }
+    .compare-col h3 { font-size: 0.95rem; margin-bottom: 4px; color: #ccc; }
+    .winner { color: #4caf50; font-weight: bold; }
+    .loser { color: #999; }
+    .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
   </style>
 </head>
 <body>
   <h1>gifhero Browser SDK Test</h1>
+  <p class="subtitle">Max 20s, 480px longest dimension. Uses VideoDecoder fast path.</p>
 
-  <!-- Test 1: Video file -->
-  <h2>1. Video File → GIF</h2>
-  <div class="row">
-    <div class="panel">
-      <input type="file" id="videoFile" accept="video/*">
-      <div class="controls">
-        <label>FPS <input type="number" id="videoFps" value="10" min="1" max="30"></label>
-        <label>Width <input type="number" id="videoWidth" value="320" min="60" max="1920"></label>
-        <label>Preset
-          <select id="videoPreset">
-            <option value="balanced">balanced</option>
-            <option value="quality">quality</option>
-          </select>
-        </label>
-      </div>
-      <button id="videoEncode" disabled>Encode GIF</button>
-      <div class="progress" id="videoProgress"></div>
-      <div class="result" id="videoResult"></div>
+  <!-- Benchmark: gifhero vs gifski -->
+  <h2>Video → GIF Benchmark</h2>
+  <div class="panel">
+    <input type="file" id="benchFile" accept="video/*">
+    <div class="controls">
+      <label>FPS <input type="number" id="benchFps" value="10" min="1" max="30"></label>
+      <label>Preset
+        <select id="benchPreset">
+          <option value="balanced">balanced</option>
+          <option value="quality">quality</option>
+        </select>
+      </label>
     </div>
-    <div class="panel">
-      <video id="videoPreview" controls muted playsinline style="max-height: 270px;"></video>
-    </div>
+    <button id="benchStart" disabled>Run Benchmark (gifhero → gifski)</button>
+    <div class="progress" id="benchProgress"></div>
+    <div class="compare" id="benchResults" style="margin-top: 12px;"></div>
   </div>
 
-  <!-- Test 1b: Video file via VideoDecoder (fromFile) -->
-  <h2>1b. Video File → GIF (VideoDecoder — fast path)</h2>
+  <!-- Quick tests -->
+  <h2>Quick Tests</h2>
   <div class="row">
     <div class="panel">
-      <input type="file" id="videoFile2" accept="video/*">
-      <div class="controls">
-        <label>FPS <input type="number" id="videoFps2" value="10" min="1" max="30"></label>
-        <label>Width <input type="number" id="videoWidth2" value="320" min="60" max="1920"></label>
-        <label>Preset
-          <select id="videoPreset2">
-            <option value="balanced">balanced</option>
-            <option value="quality">quality</option>
-          </select>
-        </label>
-      </div>
-      <button id="videoEncode2" disabled>Encode GIF (VideoDecoder)</button>
-      <div class="progress" id="videoProgress2"></div>
-      <div class="result" id="videoResult2"></div>
-    </div>
-  </div>
-
-  <!-- Test 2: Canvas drawing -->
-  <h2>2. Canvas → GIF</h2>
-  <div class="row">
-    <div class="panel">
+      <h3 style="color: #7ecfff; font-size: 0.95rem; margin-bottom: 8px;">Canvas Drawing → GIF</h3>
       <canvas id="drawCanvas" width="320" height="180" style="border: 1px solid #333; cursor: crosshair;"></canvas>
       <div class="controls" style="margin-top: 8px;">
         <button id="canvasRecord">Record 3s</button>
@@ -85,36 +66,23 @@
       <div class="progress" id="canvasProgress"></div>
       <div class="result" id="canvasResult"></div>
     </div>
-  </div>
-
-  <!-- Test 3: Webcam -->
-  <h2>3. Webcam → GIF</h2>
-  <div class="row">
     <div class="panel">
+      <h3 style="color: #7ecfff; font-size: 0.95rem; margin-bottom: 8px;">Webcam → GIF</h3>
       <div class="controls">
         <button id="webcamStart">Start Webcam</button>
-        <button id="webcamCapture" disabled>Capture 3s GIF</button>
+        <button id="webcamCapture" disabled>Capture 3s</button>
       </div>
-      <video id="webcamPreview" autoplay muted playsinline style="max-height: 200px; margin-top: 8px;"></video>
+      <video id="webcamPreview" autoplay muted playsinline style="max-height: 160px; margin-top: 8px;"></video>
       <div class="progress" id="webcamProgress"></div>
       <div class="result" id="webcamResult"></div>
     </div>
   </div>
 
-  <!-- Test 4: Screen capture -->
-  <h2>4. Screen Capture → GIF</h2>
-  <div class="row">
-    <div class="panel">
-      <div class="controls">
-        <button id="screenCapture">Capture Screen (3s)</button>
-      </div>
-      <div class="progress" id="screenProgress"></div>
-      <div class="result" id="screenResult"></div>
-    </div>
-  </div>
-
   <script type="module">
     import { gifhero } from "../../dist/browser.js";
+
+    const MAX_DURATION = 20;
+    const MAX_DIMENSION = 480;
 
     function showResult(containerId, gif, elapsed) {
       const container = document.getElementById(containerId);
@@ -128,98 +96,112 @@
       `;
     }
 
-    // ── Test 1: Video file ──
-    const videoFile = document.getElementById("videoFile");
-    const videoPreview = document.getElementById("videoPreview");
-    const videoEncode = document.getElementById("videoEncode");
+    function showCompare(containerId, label, gif, elapsed, isWinner) {
+      const sizeKB = (gif.byteLength / 1024).toFixed(0);
+      const blob = new Blob([gif.buffer], { type: "image/gif" });
+      const url = URL.createObjectURL(blob);
+      const cls = isWinner ? 'winner' : 'loser';
+      return `
+        <div class="compare-col">
+          <h3>${label} <span class="${cls}">${sizeKB} KB · ${elapsed.toFixed(1)}s</span></h3>
+          <img src="${url}" alt="${label}" style="max-width: 100%;">
+          <div class="meta"><a href="${url}" download="${label.toLowerCase()}.gif" style="color: #7ecfff;">Download</a></div>
+        </div>
+      `;
+    }
 
-    videoFile.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      videoPreview.src = URL.createObjectURL(file);
-      videoEncode.disabled = false;
+    // ── Benchmark: gifhero vs gifski ──
+    const benchFile = document.getElementById("benchFile");
+    const benchStart = document.getElementById("benchStart");
+
+    benchFile.addEventListener("change", () => {
+      if (benchFile.files[0]) benchStart.disabled = false;
     });
 
-    videoEncode.addEventListener("click", async () => {
-      videoEncode.disabled = true;
-      const progress = document.getElementById("videoProgress");
-      const file = videoFile.files[0];
-      const fps = parseInt(document.getElementById("videoFps").value) || 10;
-      const width = parseInt(document.getElementById("videoWidth").value) || 320;
-      const preset = document.getElementById("videoPreset").value;
+    benchStart.addEventListener("click", async () => {
+      benchStart.disabled = true;
+      const progress = document.getElementById("benchProgress");
+      const results = document.getElementById("benchResults");
+      results.innerHTML = "";
 
-      progress.textContent = "Loading...";
-      const t0 = performance.now();
+      const file = benchFile.files[0];
+      const fps = parseInt(document.getElementById("benchFps").value) || 10;
+      const preset = document.getElementById("benchPreset").value;
 
+      // ── gifhero ──
+      progress.textContent = "gifhero: encoding...";
+      console.log("━━━ BENCHMARK START ━━━");
+      const t1 = performance.now();
+
+      let gifheroGif;
       try {
-        const gif = await gifhero
-          .fromBlob(file)
-          .fps(fps)
-          .width(width)
-          .preset(preset)
-                    .onProgress(p => {
-            if (p.phase === "extracting") {
-              progress.textContent = `Extracting: ${p.framesExtracted}/${p.totalFrames} frames`;
-            } else {
-              progress.textContent = "Encoding...";
-            }
-          })
-          .toGif();
-
-        const elapsed = (performance.now() - t0) / 1000;
-        progress.textContent = `Done in ${elapsed.toFixed(1)}s`;
-        showResult("videoResult", gif, elapsed);
-      } catch (err) {
-        progress.textContent = `Error: ${err.message}`;
-      }
-      videoEncode.disabled = false;
-    });
-
-    // ── Test 1b: Video file via VideoDecoder ──
-    const videoFile2 = document.getElementById("videoFile2");
-    const videoEncode2 = document.getElementById("videoEncode2");
-
-    videoFile2.addEventListener("change", (e) => {
-      if (e.target.files[0]) videoEncode2.disabled = false;
-    });
-
-    videoEncode2.addEventListener("click", async () => {
-      videoEncode2.disabled = true;
-      const progress = document.getElementById("videoProgress2");
-      const file = videoFile2.files[0];
-      const fps = parseInt(document.getElementById("videoFps2").value) || 10;
-      const width = parseInt(document.getElementById("videoWidth2").value) || 320;
-      const preset = document.getElementById("videoPreset2").value;
-
-      progress.textContent = "Sending to worker...";
-      const t0 = performance.now();
-
-      try {
-        const gif = await gifhero
+        gifheroGif = await gifhero
           .fromFile(file)
           .fps(fps)
-          .width(width)
+          .width(MAX_DIMENSION)
           .preset(preset)
           .onProgress(p => {
             if (p.phase === "extracting") {
-              progress.textContent = `Decoding: ${(p.progress * 100).toFixed(0)}%`;
+              progress.textContent = `gifhero: decoding ${(p.progress * 100).toFixed(0)}%`;
             } else {
-              progress.textContent = "Encoding...";
+              progress.textContent = "gifhero: encoding...";
             }
           })
           .toGif();
-
-        const elapsed = (performance.now() - t0) / 1000;
-        progress.textContent = `Done in ${elapsed.toFixed(1)}s`;
-        showResult("videoResult2", gif, elapsed);
       } catch (err) {
-        progress.textContent = `Error: ${err.message}`;
+        progress.textContent = `gifhero error: ${err.message}`;
         console.error(err);
+        benchStart.disabled = false;
+        return;
       }
-      videoEncode2.disabled = false;
+      const gifheroTime = (performance.now() - t1) / 1000;
+      const gifheroSize = gifheroGif.byteLength;
+      console.log(`[benchmark] gifhero: ${(gifheroSize/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
+
+      // ── gifski (via server, if available) ──
+      progress.textContent = "gifski: encoding (server-side)...";
+      let gifskiGif = null;
+      let gifskiTime = 0;
+
+      try {
+        const t2 = performance.now();
+        const formData = new FormData();
+        formData.append("video", file);
+        formData.append("fps", String(fps));
+        formData.append("width", String(MAX_DIMENSION));
+
+        const resp = await fetch("/api/gifski", { method: "POST", body: formData });
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          gifskiGif = new Uint8Array(buf);
+          gifskiTime = (performance.now() - t2) / 1000;
+          console.log(`[benchmark] gifski: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
+        } else {
+          console.log("[benchmark] gifski server not available (no /api/gifski endpoint)");
+        }
+      } catch {
+        console.log("[benchmark] gifski server not reachable");
+      }
+
+      // ── Show results ──
+      console.log("━━━ BENCHMARK END ━━━");
+      progress.textContent = "";
+
+      if (gifskiGif) {
+        const heroWins = gifheroSize <= gifskiGif.byteLength;
+        results.innerHTML =
+          showCompare("benchResults", "gifhero", gifheroGif, gifheroTime, heroWins) +
+          showCompare("benchResults", "gifski", gifskiGif, gifskiTime, !heroWins);
+      } else {
+        results.innerHTML = showCompare("benchResults", "gifhero", gifheroGif, gifheroTime, true) +
+          `<div class="compare-col"><h3>gifski</h3><div class="meta">Not available — needs a local gifski server at /api/gifski.<br>
+          Run: <code>npx tsx test/browser/gifski-server.ts</code></div></div>`;
+      }
+
+      benchStart.disabled = false;
     });
 
-    // ── Test 2: Canvas drawing ──
+    // ── Canvas drawing ──
     const drawCanvas = document.getElementById("drawCanvas");
     const drawCtx = drawCanvas.getContext("2d");
     drawCtx.fillStyle = "#1a1a2e";
@@ -250,7 +232,7 @@
         const gif = await gifhero
           .fromCanvas(drawCanvas, { frameCount: 30 })
           .fps(10)
-                    .onProgress(p => {
+          .onProgress(p => {
             if (p.phase === "extracting") progress.textContent = `Recording: ${p.framesExtracted}/${p.totalFrames}`;
             else progress.textContent = "Encoding...";
           })
@@ -265,7 +247,7 @@
       btn.disabled = false;
     });
 
-    // ── Test 3: Webcam ──
+    // ── Webcam ──
     let webcamStream = null;
 
     document.getElementById("webcamStart").addEventListener("click", async () => {
@@ -291,7 +273,7 @@
           .fps(10)
           .duration(3)
           .width(240)
-                    .onProgress(p => {
+          .onProgress(p => {
             if (p.phase === "extracting") progress.textContent = `Capturing: ${p.framesExtracted} frames`;
             else progress.textContent = "Encoding...";
           })
@@ -300,37 +282,6 @@
         const elapsed = (performance.now() - t0) / 1000;
         progress.textContent = `Done in ${elapsed.toFixed(1)}s`;
         showResult("webcamResult", gif, elapsed);
-      } catch (err) {
-        progress.textContent = `Error: ${err.message}`;
-      }
-      btn.disabled = false;
-    });
-
-    // ── Test 4: Screen capture ──
-    document.getElementById("screenCapture").addEventListener("click", async () => {
-      const btn = document.getElementById("screenCapture");
-      btn.disabled = true;
-      const progress = document.getElementById("screenProgress");
-
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        const t0 = performance.now();
-
-        const gif = await gifhero
-          .fromStream(stream)
-          .fps(10)
-          .duration(3)
-          .width(480)
-                    .onProgress(p => {
-            if (p.phase === "extracting") progress.textContent = `Capturing: ${p.framesExtracted} frames`;
-            else progress.textContent = "Encoding...";
-          })
-          .toGif();
-
-        stream.getTracks().forEach(t => t.stop());
-        const elapsed = (performance.now() - t0) / 1000;
-        progress.textContent = `Done in ${elapsed.toFixed(1)}s`;
-        showResult("screenResult", gif, elapsed);
       } catch (err) {
         progress.textContent = `Error: ${err.message}`;
       }

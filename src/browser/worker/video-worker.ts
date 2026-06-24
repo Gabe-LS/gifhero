@@ -21,6 +21,7 @@ interface VideoEncodeRequest {
   fps: number;
   targetWidth?: number;
   preset: "quality" | "balanced";
+  maxDuration?: number;
   lossyLzw?: number;
   maxColors?: number;
   loop: number;
@@ -29,7 +30,7 @@ interface VideoEncodeRequest {
 wlog("Video worker loaded");
 
 self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
-  const { type, id, videoBuffer, fps, targetWidth, preset, lossyLzw, maxColors, loop } = e.data;
+  const { type, id, videoBuffer, fps, targetWidth, preset, maxDuration, lossyLzw, maxColors, loop } = e.data;
   if (type !== "encode-video") return;
 
   try {
@@ -57,17 +58,24 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     wlog(`Demuxed: ${srcW}×${srcH}, ${duration.toFixed(1)}s, codec=${decoderConfig.codec}`);
 
     // ── Step 2: Compute extraction geometry ──
+    // targetWidth is treated as "longest dimension" to handle
+    // portrait video correctly.
     let extractW = srcW;
     let extractH = srcH;
-    if (targetWidth && targetWidth < srcW) {
-      const ideal = targetWidth * 3;
-      if (srcW > ideal * 1.15) {
-        extractW = Math.min(ideal, 1920);
-        extractH = Math.floor(srcH * (extractW / srcW));
+    const longestSrc = Math.max(srcW, srcH);
+    const targetDim = targetWidth ?? longestSrc;
+    if (targetDim < longestSrc) {
+      const scale = targetDim / longestSrc;
+      const idealW = Math.round(srcW * scale * 3);
+      const idealH = Math.round(srcH * scale * 3);
+      if (longestSrc > Math.max(idealW, idealH) * 1.15) {
+        extractW = Math.min(idealW, 1920);
+        extractH = Math.min(idealH, 1920);
       }
-    } else if (srcW > 2560) {
-      extractW = 1920;
-      extractH = Math.floor(srcH * (extractW / srcW));
+    } else if (longestSrc > 2560) {
+      const scale = 1920 / longestSrc;
+      extractW = Math.round(srcW * scale);
+      extractH = Math.round(srcH * scale);
     }
     wlog(`Extraction size: ${extractW}×${extractH}`);
 
@@ -83,9 +91,13 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     let nextSampleTime = 0;
     let decoded = 0;
 
+    const maxTs = maxDuration ?? Infinity;
+
     for await (const sample of sink.samples()) {
       decoded++;
       const ts = sample.timestamp ?? 0;
+
+      if (ts > maxTs) { sample.close(); break; }
 
       if (ts >= nextSampleTime) {
         const videoFrame = sample.toVideoFrame();
@@ -130,13 +142,21 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     }
     bitmaps.length = 0;
 
+    // Compute final target width for Lanczos3 downscale.
+    // targetWidth constrains the longest dimension.
+    let finalTargetWidth: number | undefined;
+    if (targetDim < longestSrc) {
+      const scale = targetDim / longestSrc;
+      finalTargetWidth = Math.round(srcW * scale);
+    }
+
     const gif = await encode({
       width: extractW,
       height: extractH,
       frames,
       preset,
       loop,
-      ...(targetWidth && targetWidth < extractW ? { targetWidth } : {}),
+      ...(finalTargetWidth && finalTargetWidth < extractW ? { targetWidth: finalTargetWidth } : {}),
       ...(lossyLzw !== undefined ? { lossyLzw } : {}),
       ...(maxColors !== undefined ? { maxColors } : {}),
     });

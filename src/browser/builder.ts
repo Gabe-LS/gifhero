@@ -219,6 +219,7 @@ export class GifHeroBuilder {
           videoBuffer,
           fps: this._fps,
           targetWidth: this._targetWidth,
+          maxDuration: this._duration,
           preset: this._preset,
           lossyLzw: this._lossyLzw,
           maxColors: this._maxColors,
