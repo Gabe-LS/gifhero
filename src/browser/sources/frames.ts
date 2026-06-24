@@ -7,12 +7,16 @@ import type { FrameSource, ExtractedFrames } from "../types.js";
  * Accepts ImageData objects or raw Uint8ClampedArray RGBA buffers.
  */
 export class FramesSource implements FrameSource {
+  delay: number;
+
   constructor(
     private rawFrames: Array<ImageData | Uint8ClampedArray>,
     private width: number,
     private height: number,
-    private delay: number = 100,
-  ) {}
+    delay: number = 100,
+  ) {
+    this.delay = delay;
+  }
 
   async extract(
     onProgress?: (extracted: number, total: number) => void,

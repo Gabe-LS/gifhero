@@ -87,10 +87,12 @@ export class GifHeroBuilder {
       return this._encodeViaVideoWorker(signal);
     }
 
-    // Pass target width to source so extraction happens at target
-    // resolution — avoids holding full-resolution frames in memory.
+    // Pass settings to source
     if (this._targetWidth && "targetWidth" in this._source) {
       (this._source as any).targetWidth = this._targetWidth;
+    }
+    if ("delay" in this._source) {
+      (this._source as any).delay = Math.round(1000 / this._fps);
     }
 
     log("Extracting frames...");
