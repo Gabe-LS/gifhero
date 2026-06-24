@@ -43,12 +43,25 @@ export interface ExtractedFrames {
   height: number;
 }
 
+/**
+ * Lightweight frame store using ImageBitmap.
+ * Pixel data lives in native/GPU memory, not the JS heap.
+ * Converted to RGBA on demand via materialize().
+ */
+export interface DeferredFrames {
+  bitmaps: ImageBitmap[];
+  delays: number[];
+  width: number;
+  height: number;
+  materialize(): ExtractedFrames;
+}
+
 /** Frame source: any input that can produce EncodeFrame[]. */
 export interface FrameSource {
   extract(
     onProgress?: (extracted: number, total: number) => void,
     signal?: AbortSignal,
-  ): Promise<ExtractedFrames>;
+  ): Promise<ExtractedFrames | DeferredFrames>;
 }
 
 /** Result from a MediaStream recording session. */

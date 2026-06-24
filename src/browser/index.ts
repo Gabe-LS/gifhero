@@ -30,6 +30,7 @@ export type {
   StreamSourceOptions,
   CanvasSourceOptions,
   ExtractedFrames,
+  DeferredFrames,
   FrameSource,
 } from "./types.js";
 

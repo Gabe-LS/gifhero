@@ -1,12 +1,13 @@
 import type { EncodeFrame } from "../../index.js";
-import type { FrameSource, ExtractedFrames, VideoSourceOptions } from "../types.js";
+import type { FrameSource, DeferredFrames, VideoSourceOptions } from "../types.js";
 
 /**
  * Extract frames from an HTMLVideoElement by seeking.
  *
- * Creates an offscreen canvas at the target size (or source size if
- * no target), seeks to each time position, draws the video frame
- * (browser does the downscale via drawImage), and extracts RGBA pixels.
+ * Stores frames as ImageBitmap objects (native/GPU memory) instead
+ * of raw RGBA arrays. Pixel data is materialized on demand when
+ * the encoder needs it, keeping JS heap usage minimal during
+ * extraction.
  */
 export class VideoSource implements FrameSource {
   private _targetWidth?: number;
@@ -21,7 +22,7 @@ export class VideoSource implements FrameSource {
   async extract(
     onProgress?: (extracted: number, total: number) => void,
     signal?: AbortSignal,
-  ): Promise<ExtractedFrames> {
+  ): Promise<DeferredFrames> {
     const video = this.video;
 
     if (video.readyState < 1) {
@@ -44,9 +45,6 @@ export class VideoSource implements FrameSource {
     let width = srcW;
     let height = srcH;
 
-    // Only pre-downscale if the source is significantly larger than
-    // 3× the target (15% tolerance). Bilinear drawImage handles the
-    // first pass, then Lanczos3 in encode() does the final downscale.
     if (this._targetWidth && this._targetWidth < srcW) {
       const ideal = this._targetWidth * 3;
       if (srcW > ideal * 1.15) {
@@ -68,7 +66,8 @@ export class VideoSource implements FrameSource {
     for (let t = start; t < end; t += interval) times.push(t);
 
     const delay = Math.round(1000 / fps);
-    const frames: EncodeFrame[] = [];
+    const bitmaps: ImageBitmap[] = [];
+    const delays: number[] = [];
 
     for (let i = 0; i < times.length; i++) {
       signal?.throwIfAborted();
@@ -79,11 +78,28 @@ export class VideoSource implements FrameSource {
       });
 
       ctx.drawImage(video, 0, 0, width, height);
-      const imageData = ctx.getImageData(0, 0, width, height);
-      frames.push({ data: imageData.data, delay });
+      const bitmap = await createImageBitmap(canvas);
+      bitmaps.push(bitmap);
+      delays.push(delay);
       onProgress?.(i + 1, times.length);
     }
 
-    return { frames, width, height };
+    return {
+      bitmaps, delays, width, height,
+      materialize() {
+        const c = document.createElement("canvas");
+        c.width = width;
+        c.height = height;
+        const cx = c.getContext("2d", { willReadFrequently: true })!;
+        const frames: EncodeFrame[] = [];
+        for (let i = 0; i < bitmaps.length; i++) {
+          cx.drawImage(bitmaps[i], 0, 0);
+          frames.push({ data: cx.getImageData(0, 0, width, height).data, delay: delays[i] });
+          bitmaps[i].close();
+        }
+        bitmaps.length = 0;
+        return { frames, width, height };
+      },
+    };
   }
 }

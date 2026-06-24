@@ -90,22 +90,33 @@ export class GifHeroBuilder {
     log("Extracting frames...");
     const t0 = performance.now();
 
-    const { frames, width, height } = await this._source.extract(
-      (extracted, total) => {
+    const extracted = await this._source.extract(
+      (done, total) => {
         this._onProgress?.({
           phase: "extracting",
-          progress: total > 0 ? extracted / total : 0,
-          framesExtracted: extracted,
+          progress: total > 0 ? done / total : 0,
+          framesExtracted: done,
           totalFrames: total,
         });
-        if (extracted % 10 === 0 || extracted === total) {
-          log(`Extracted ${extracted}/${total} frames`);
+        if (done % 10 === 0 || done === total) {
+          log(`Extracted ${done}/${total} frames`);
         }
       },
       signal,
     );
 
     signal.throwIfAborted();
+
+    // Materialize deferred frames (ImageBitmap → RGBA) if needed
+    let frames, width, height;
+    if ("materialize" in extracted) {
+      log(`Materializing ${extracted.bitmaps.length} ImageBitmaps to RGBA...`);
+      const mt0 = performance.now();
+      ({ frames, width, height } = extracted.materialize());
+      log(`Materialized in ${((performance.now() - mt0) / 1000).toFixed(1)}s`);
+    } else {
+      ({ frames, width, height } = extracted);
+    }
 
     const extractMs = performance.now() - t0;
     const totalPixels = frames.length * width * height;
