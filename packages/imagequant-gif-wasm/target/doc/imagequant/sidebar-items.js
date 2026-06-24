@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LIQ_HIGH_MEMORY_LIMIT"],"enum":["ControlFlow","Error"],"fn":["new"],"mod":["attr","blur","error","hist","image","kmeans","mediancut","nearest","pal","quant","rayoff","remap","rows","seacow"],"struct":["Attributes","CacheLineAlign","Histogram","HistogramEntry","Image","OrdFloat","QuantizationResult"],"trait":["PushInCapacity"],"type":["RGBA"]};

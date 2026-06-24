@@ -1,0 +1,1 @@
+/Users/gabrielelosurdo/Documents/Developer/Libraries/gifhero/packages/imagequant-gif-wasm/target/wasm32-unknown-unknown/release/imagequant_gif_wasm.wasm: /Users/gabrielelosurdo/Documents/Developer/Libraries/gifhero/packages/imagequant-gif-wasm/src/lib.rs

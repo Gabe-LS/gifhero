@@ -48,7 +48,7 @@ async function main() {
   // Build encode options for each job
   function makeOptions(ct: number): Omit<EncodeOptions, "width" | "height" | "frames"> {
     return {
-      preset: "balanced",
+      preset: "quality",
       optimize: { subframe: true, cropTolerance: ct, holeTolerance: 0, transparencyEqualization: true },
     };
   }

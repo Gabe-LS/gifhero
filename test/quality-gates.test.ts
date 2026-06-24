@@ -60,7 +60,7 @@ describe("quality gates", () => {
  *       width: 480,
  *       height: 270,
  *       frames: frames.map(f => ({ data: f, delay: 50 })),
- *       preset: "balanced",
+ *       preset: "quality",
  *     });
  *
  *     const gifPath = join(tmpdir(), "gifhero-test-gradient.gif");

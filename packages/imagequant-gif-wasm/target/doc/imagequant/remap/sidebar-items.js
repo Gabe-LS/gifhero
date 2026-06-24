@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DitherMapMode"],"fn":["dither_row","get_dithered_pixel","mse_to_standard_mse","remap_to_palette","remap_to_palette_floyd"],"struct":["Remapped"]};

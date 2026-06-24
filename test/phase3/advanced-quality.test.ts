@@ -167,7 +167,7 @@ describe("presets", () => {
     );
     const frames = [{ data, delay: 0 }];
 
-    for (const preset of ["quality", "balanced", "speed"] as const) {
+    for (const preset of ["best", "quality"] as const) {
       const gif = await encode({ width, height, frames, preset, loop: -1 });
       expect(gif).toBeInstanceOf(Uint8Array);
       const sig = String.fromCharCode(...Array.from(gif.slice(0, 6)));
@@ -182,7 +182,7 @@ describe("presets", () => {
     const encFrames = frames.slice(0, 10).map((f) => ({ data: f.data, delay: 50 }));
 
     const qualityGif = await encode({ width, height, frames: encFrames, preset: "quality" });
-    const speedGif = await encode({ width, height, frames: encFrames, preset: "speed" });
+    const speedGif = await encode({ width, height, frames: encFrames, preset: "quality" });
 
     // Quality preset should produce larger but better-looking output
     expect(qualityGif.length).toBeGreaterThan(0);

@@ -115,7 +115,7 @@ export interface EncodeOptions {
   /** One or more frames to encode. */
   frames: EncodeFrame[];
   /** Preset that sets defaults for all options. Individual options override preset values. */
-  preset?: "best" | "quality" | "balanced" | "speed";
+  preset?: "best" | "quality";
   /** Quantizer algorithm. 'imagequant' requires the optional `imagequant` npm package. */
   quantizer?: "imagequant" | "neuquant";
   /** NeuQuant sampling quality 1–30 (1 = best, 30 = fastest). Only used when quantizer='neuquant'. */
@@ -239,66 +239,10 @@ const PRESETS: Record<string, ResolvedOptions> = {
       frameDiffDistanceMode: "max",
     },
   },
-  balanced: {
-    quantizer: "imagequant",
-    quantizerQuality: 80,
-    quantizerSpeed: 3,
-    maxColors: 256,
-    palette: "crossframe",
-    dither: "floyd-steinberg",
-    ditherSerpentine: true,
-    temporalDither: false,
-    temporalWeight: 0,
-    lossyLzw: 4,
-    loop: 0,
-    optimize: {
-      subframe: true,
-      cropTolerance: 5,
-      holeTolerance: 0,
-      transparencyEqualization: true,
-      staleThreshold: 8,
-      probeTolerance: 3,
-      transeqNeighborThreshold: 6,
-      disposalOptimize: true,
-      dropThreshold: 0,
-      frameDiff: true,
-      frameDiffTolerance: 2,
-      frameDiffErode: 0,
-      frameDiffDistanceMode: "max",
-    },
-  },
-  speed: {
-    quantizer: "neuquant",
-    quantizerQuality: 20,
-    quantizerSpeed: 10,
-    maxColors: 256,
-    palette: "crossframe",
-    dither: "floyd-steinberg",
-    ditherSerpentine: true,
-    temporalDither: false,
-    temporalWeight: 0,
-    lossyLzw: 0,
-    loop: 0,
-    optimize: {
-      subframe: true,
-      cropTolerance: 5,
-      holeTolerance: 0,
-      transparencyEqualization: true,
-      staleThreshold: 8,
-      probeTolerance: 3,
-      transeqNeighborThreshold: 6,
-      disposalOptimize: false,
-      dropThreshold: 0,
-      frameDiff: true,
-      frameDiffTolerance: 5,
-      frameDiffErode: 0,
-      frameDiffDistanceMode: "max",
-    },
-  },
 };
 
 function resolveOptions(options: EncodeOptions): ResolvedOptions {
-  const base = PRESETS[options.preset ?? "balanced"];
+  const base = PRESETS[options.preset ?? "quality"];
 
   let userOpt: ResolvedOptimize;
   if (options.optimize === false) {
@@ -419,7 +363,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const presetName = options.preset ?? "balanced";
+    const presetName = options.preset ?? "quality";
     const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName);
 
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
@@ -456,7 +400,7 @@ async function encodeSubframePipeline(
   height: number,
   opts: ResolvedOptions,
   downscaleRatio: number = 1,
-  presetName: string = "balanced",
+  presetName: string = "quality",
 ): Promise<{ gifFrames: GifFrame[]; probe: ProbeResult }> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
