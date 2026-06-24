@@ -57,27 +57,11 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     const duration = await input.getDurationFromMetadata([videoTrack]) ?? await input.computeDuration([videoTrack]);
     wlog(`Demuxed: ${srcW}×${srcH}, ${duration.toFixed(1)}s, codec=${decoderConfig.codec}`);
 
-    // ── Step 2: Compute extraction geometry ──
-    // targetWidth is treated as "longest dimension" to handle
-    // portrait video correctly.
-    let extractW = srcW;
-    let extractH = srcH;
-    const longestSrc = Math.max(srcW, srcH);
-    const targetDim = targetWidth ?? longestSrc;
-    if (targetDim < longestSrc) {
-      const scale = targetDim / longestSrc;
-      const idealW = Math.round(srcW * scale * 2);
-      const idealH = Math.round(srcH * scale * 2);
-      if (longestSrc > Math.max(idealW, idealH) * 1.15) {
-        extractW = Math.min(idealW, 1920);
-        extractH = Math.min(idealH, 1920);
-      }
-    } else if (longestSrc > 2560) {
-      const scale = 1920 / longestSrc;
-      extractW = Math.round(srcW * scale);
-      extractH = Math.round(srcH * scale);
-    }
-    wlog(`Extraction size: ${extractW}×${extractH}`);
+    // Extract at full resolution — Lanczos3 in encode() handles
+    // downscaling to targetWidth with maximum quality.
+    const extractW = srcW;
+    const extractH = srcH;
+    wlog(`Extraction size: ${extractW}×${extractH} (full resolution)`);
 
     // ── Step 3: Decode + sample at target FPS + probe ──
     const canvas = new OffscreenCanvas(extractW, extractH);
@@ -142,11 +126,11 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     }
     bitmaps.length = 0;
 
-    // Compute final target width for Lanczos3 downscale.
     // targetWidth constrains the longest dimension.
     let finalTargetWidth: number | undefined;
-    if (targetDim < longestSrc) {
-      const scale = targetDim / longestSrc;
+    if (targetWidth) {
+      const longestSrc = Math.max(srcW, srcH);
+      const scale = Math.min(1, targetWidth / longestSrc);
       finalTargetWidth = Math.round(srcW * scale);
     }
 
