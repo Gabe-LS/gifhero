@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["find_best_palette","mse_to_quality","palette_from_histogram","quality_to_mse","refine_palette","sort_palette"],"struct":["QuantizationResult"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["MutCow","SeaCowInner"],"struct":["Pointer","PointerMut","RowBitmap","RowBitmapMut","SeaCow"]};

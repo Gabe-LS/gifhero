@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["LEAF_MAX_SIZE"],"enum":["NodeInner"],"fn":["vp_create_node","vp_search_node"],"struct":["MapIndex","Nearest","Node","Visitor"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["INTERNAL_GAMMA","LIQ_WEIGHT_A","LIQ_WEIGHT_B","LIQ_WEIGHT_G","LIQ_WEIGHT_MSE","LIQ_WEIGHT_R","MAX_COLORS","MAX_TRANSP_A","MIN_OPAQUE_A"],"fn":["gamma_lut","posterize_channel"],"struct":["PalF","PalPop","Palette","f_pixel"],"type":["ARGBF","PalIndex","PalIndexRemap","PalLen","RGBA"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["LIQ_MAXCLUSTER"],"struct":["Cluster","HashColor","HistItem","Histogram","HistogramEntry","HistogramInternal","TempHistItem","U32Hasher"],"type":["FixedColorsSet"],"union":["HistSortTmp","RGBAInt"]};

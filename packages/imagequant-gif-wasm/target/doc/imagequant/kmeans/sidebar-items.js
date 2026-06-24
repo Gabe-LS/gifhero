@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["replace_unused_colors"],"struct":["ColorAvg","Kmeans"]};

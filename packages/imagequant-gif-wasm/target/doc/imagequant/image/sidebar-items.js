@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["try_zero_vec"],"struct":["Image"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["PixelsSource"],"fn":["box_assume_init","slice_assume_init_mut","temp_buf"],"struct":["DynamicRows","DynamicRowsIter"],"type":["RowCallback"]};

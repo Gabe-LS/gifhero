@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["hist_item_sort_half","mediancut","qsort_partition","qsort_pivot","weighed_average_color"],"struct":["MBox","MedianCutter"]};

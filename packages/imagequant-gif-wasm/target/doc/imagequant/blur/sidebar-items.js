@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["liq_blur","liq_max3","liq_min3","liq_op3","transposing_1d_blur"]};
