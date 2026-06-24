@@ -11,11 +11,15 @@ export default defineConfig([
     entry: { browser: "src/browser/index.ts" },
     format: ["esm"],
     dts: true,
+    noExternal: [/.*/],
     external: ["fs", "module", "path", "zlib"],
+    splitting: false,
   },
   {
     entry: { "browser-worker": "src/browser/worker/encode-worker.ts" },
     format: ["esm"],
+    noExternal: [/.*/],
     external: ["fs", "module", "path", "zlib"],
+    splitting: false,
   },
 ]);

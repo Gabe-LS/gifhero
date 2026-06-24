@@ -8,13 +8,13 @@ import { neuquant } from "./quantizers/index.js";
 // Lazy import — imagequant.ts uses Node.js APIs (fs, zlib) that
 // aren't available in browsers. Only loaded when the fallback
 // npm imagequant package is actually needed.
-let _quantizeImagequant: typeof import("./quantizers/imagequant.js").quantizeImagequant | null = null;
-async function getQuantizeImagequant() {
-  if (!_quantizeImagequant) {
-    const m = await import("./quantizers/imagequant.js");
-    _quantizeImagequant = m.quantizeImagequant;
-  }
-  return _quantizeImagequant;
+// Computed path prevents bundlers from resolving this statically.
+// imagequant.ts uses Node.js APIs (fs, zlib) — must not be bundled
+// into browser builds.
+async function getQuantizeImagequant(): Promise<(rgba: Uint8ClampedArray, w: number, h: number, opts: any) => Promise<any>> {
+  const modPath = "./quantizers/imagequant.js";
+  const m = await import(/* @vite-ignore */ modPath);
+  return m.quantizeImagequant;
 }
 import { floydSteinberg, mapNearest } from "./dither/index.js";
 import { ditherFrameTemporal } from "./dither/temporal.js";
