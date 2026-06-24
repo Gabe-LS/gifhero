@@ -141,7 +141,7 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     },
   };
 
-  encoders[`gifhero${suffix}`] = {
+  encoders[`gifhero-balanced${suffix}`] = {
     available: () => true,
     encode: async (framesDir, outputPath) => {
       const { width, height, frames } = loadPngFrames(framesDir);
@@ -752,7 +752,7 @@ const FAST_FIXTURES = new Set([
   "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
 ]);
 const FAST_ENCODERS = new Set(
-  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero${suffix}`, `gifhero-quality${suffix}`]),
+  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero-balanced${suffix}`, `gifhero-quality${suffix}`]),
 );
 
 // ─────────────────────────────────────────────
@@ -840,7 +840,7 @@ async function main() {
           const isQualityPreset = encoderName.startsWith("gifhero-quality");
           const suffix = isQualityPreset
             ? encoderName.replace("gifhero-quality", "")
-            : encoderName.replace("gifhero", "");
+            : encoderName.replace("gifhero-balanced", "");
           const res = RESOLUTIONS.find((r) => r.suffix === suffix);
           const tw = res?.targetWidth && res.targetWidth < loaded.width
             ? res.targetWidth : undefined;
