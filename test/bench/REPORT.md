@@ -192,6 +192,42 @@ Both presets share: Floyd-Steinberg dithering, adaptive lossyLzw 4–5, conditio
 
 ---
 
+## Notable Results
+
+### Biggest VMAF Wins (quality preset − gifski)
+
+| Fixture | Res | Δ VMAF | Δ Size |
+|---------|-----|--------|--------|
+| fast-action | 160p | **+12.5** | +28% |
+| bbb-clip-07 | 160p | **+10.2** | -13% |
+| black-and-white | 160p | **+9.5** | +12% |
+| fast-action | 240p | **+9.1** | +25% |
+| bbb-clip-07 | 240p | **+8.5** | -16% |
+
+### Worst VMAF Deltas (quality preset − gifski)
+
+| Fixture | Res | Δ VMAF | Δ Size |
+|---------|-----|--------|--------|
+| bbb-clip-05 | 480p | -1.2 | **-28%** |
+| bbb-clip-01 | 480p | -1.2 | **-31%** |
+| bbb-clip-03 | 480p | -1.0 | **-20%** |
+| city-night | 240p | -0.6 | **-24%** |
+| bbb-clip-01 | 360p | -0.6 | **-29%** |
+
+Every VMAF loss is under 2 points and paired with a significant size reduction.
+
+### Biggest Size Wins (balanced preset)
+
+| Fixture | Res | Δ Size | Δ VMAF |
+|---------|-----|--------|--------|
+| screencast | 240p | **-77%** | +0.1 |
+| screencast | 160p | **-73%** | -1.4 |
+| screencast | 480p | **-69%** | +0.0 |
+| screencast | 360p | **-69%** | +0.5 |
+| skin-tones | 160p | **-52%** | -0.9 |
+
+---
+
 ## Architecture
 
 ```
