@@ -13,94 +13,96 @@
     --orange: #d18616;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 24px; max-width: 1400px; margin: 0 auto; }
-  h1 { font-size: 2rem; margin-bottom: 8px; }
-  h2 { font-size: 1.4rem; margin: 32px 0 12px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-  h3 { font-size: 1.1rem; margin: 20px 0 8px; color: var(--text2); }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 2rem; margin-bottom: 4px; }
+  h2 { font-size: 1.3rem; margin: 40px 0 12px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
   p, .desc { color: var(--text2); font-size: 0.9rem; margin-bottom: 12px; }
-  .subtitle { font-size: 1rem; color: var(--text2); margin-bottom: 24px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  @media (max-width: 900px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-  .card canvas { width: 100% !important; height: auto !important; }
-  .stat { text-align: center; padding: 20px; }
-  .stat .num { font-size: 2.2rem; font-weight: 700; }
-  .stat .label { font-size: 0.85rem; color: var(--text2); }
+  .subtitle { font-size: 0.95rem; color: var(--text2); margin-bottom: 28px; }
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  @media (max-width: 700px) { .stats-grid { grid-template-columns: 1fr 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .chart-card { padding: 20px; }
+  .chart-card canvas { max-height: 400px; }
+  .stat { text-align: center; padding: 16px 8px; }
+  .stat .num { font-size: 2rem; font-weight: 700; }
+  .stat .label { font-size: 0.8rem; color: var(--text2); margin-top: 2px; }
   .stat.green .num { color: var(--green); }
   .stat.blue .num { color: var(--accent); }
   .stat.purple .num { color: var(--purple); }
   .stat.yellow .num { color: var(--yellow); }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
-  .badge.win { background: #1a3a2a; color: var(--green); }
-  .badge.loss { background: #3a1a1a; color: var(--red); }
 
-  /* Tables */
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px; }
-  th { background: var(--surface); color: var(--text2); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 16px; }
+  th { background: var(--surface); color: var(--text2); font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; padding: 10px 10px; text-align: left; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
   th:hover { color: var(--accent); }
-  th .arrow { font-size: 0.65rem; margin-left: 4px; opacity: 0.4; }
+  th .arrow { font-size: 0.6rem; margin-left: 3px; opacity: 0.3; }
   th.sorted .arrow { opacity: 1; color: var(--accent); }
-  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tr:hover td { background: rgba(88,166,255,0.05); }
-  tr.highlight td { background: rgba(63,185,80,0.08); }
+  tr.highlight td { background: rgba(63,185,80,0.06); }
+  .bar { display: inline-block; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 5px; min-width: 2px; }
 
-  .bar { display: inline-block; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 6px; min-width: 2px; }
-  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
-  .filter-row label { font-size: 0.8rem; color: var(--text2); }
-  .filter-row select, .filter-row input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 0.8rem; }
-  .chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--border); margin: 2px; }
-  .chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .filter-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .filter-row .label { font-size: 0.78rem; color: var(--text2); font-weight: 600; margin-right: 2px; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; cursor: pointer; border: 1px solid var(--border); margin: 2px; transition: all 0.15s; }
+  .chip.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
   .chip:hover { border-color: var(--accent); }
-  #loadStatus { text-align: center; padding: 40px; color: var(--text2); }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; }
+
+  #loadStatus { text-align: center; padding: 60px 20px; }
+  #loadStatus p { font-size: 1rem; color: var(--text); }
+  #fileInput { margin-top: 16px; }
+  .meta { font-size: 0.78rem; color: var(--text2); margin-bottom: 20px; }
 </style>
 </head>
 <body>
 <h1>gifhero Benchmark Report</h1>
-<p class="subtitle">
-  Interactive analysis of GIF encoder quality, compression, and speed.
-  <br>Click column headers to sort. Use filters to focus on specific encoders or fixtures.
-</p>
+<p class="subtitle">Interactive quality, compression, and speed analysis across 8 GIF encoders.</p>
 
 <div id="loadStatus">
-  <p>Drop a benchmark JSON file here, or select one:</p>
-  <input type="file" id="fileInput" accept=".json" style="margin-top: 12px;">
-  <p style="margin-top: 8px; font-size: 0.8rem;">Files are in <code>test/bench/results/</code></p>
+  <p>Select a benchmark results file:</p>
+  <input type="file" id="fileInput" accept=".json">
+  <p style="margin-top: 12px; font-size: 0.82rem; color: var(--text2);">JSON files are in <code>test/bench/results/</code></p>
 </div>
 
 <div id="report" style="display:none;">
 
-<!-- Key stats -->
-<div class="grid" id="statsRow"></div>
+<div id="metaLine" class="meta"></div>
+<div class="stats-grid" id="statsRow"></div>
 
-<!-- Charts -->
-<h2>Quality vs Size</h2>
-<div class="grid">
-  <div class="card"><canvas id="chartSizeVmaf"></canvas></div>
-  <div class="card"><canvas id="chartSizeSsim"></canvas></div>
-</div>
+<h2>File Size vs Perceptual Quality</h2>
+<p>Each dot is one fixture. Lower-left is the goal: small file, high quality.</p>
+<div class="card chart-card"><canvas id="chartSizeVmaf"></canvas></div>
+
+<h2>File Size vs Structural Similarity</h2>
+<p>SSIM measures structural preservation independent of perceptual modeling. Higher is better.</p>
+<div class="card chart-card"><canvas id="chartSizeSsim"></canvas></div>
 
 <h2>Compression Efficiency</h2>
-<div class="grid">
-  <div class="card"><canvas id="chartBpp"></canvas></div>
-  <div class="card"><canvas id="chartSizeByFixture"></canvas></div>
-</div>
+<p>Average bits per pixel across all fixtures. Lower means better compression for the same frame dimensions.</p>
+<div class="card chart-card"><canvas id="chartBpp"></canvas></div>
+
+<h2>File Size by Fixture</h2>
+<p>Per-fixture comparison of the four main encoders.</p>
+<div class="card chart-card"><canvas id="chartSizeByFixture"></canvas></div>
 
 <h2>Encoding Speed</h2>
-<div class="grid">
-  <div class="card"><canvas id="chartSpeed"></canvas></div>
-  <div class="card"><canvas id="chartSpeedVsSize"></canvas></div>
-</div>
+<p>Average encoding time per fixture (Node.js pipeline). gifski and ffmpeg use native multi-threading; gifhero runs single-threaded WASM quantization.</p>
+<div class="card chart-card"><canvas id="chartSpeed"></canvas></div>
 
-<h2>Resolution Scaling</h2>
-<div class="card"><canvas id="chartResolution"></canvas></div>
+<h2>Speed vs Size Trade-off</h2>
+<p>Each point is one encoder's average across all fixtures. Lower-left is ideal: fast and small.</p>
+<div class="card chart-card"><canvas id="chartSpeedVsSize"></canvas></div>
 
-<!-- Full data table -->
+<h2>File Size by Resolution</h2>
+<p>How compression scales when downscaling the same fixtures to 360p, 240p, and 160p.</p>
+<div class="card chart-card"><canvas id="chartResolution"></canvas></div>
+
 <h2>Full Results</h2>
 <div class="filter-row">
-  <label>Resolution:</label>
+  <span class="label">Resolution:</span>
   <div id="resFilters"></div>
-  <label style="margin-left: 12px;">Encoder:</label>
+  <div class="sep"></div>
+  <span class="label">Encoder:</span>
   <div id="encFilters"></div>
 </div>
 <div style="overflow-x: auto;">
@@ -123,15 +125,15 @@ const ENCODER_COLORS = {
   'magick': '#bc8cff',
   'ffmpeg+gifsicle': '#8b949e',
 };
-const ENCODER_SHORT = {
-  'gifhero-balanced': 'gifhero bal',
-  'gifhero-quality': 'gifhero q',
-  'gifski': 'gifski',
-  'gifski-lossy': 'gifski-lossy',
+const ENCODER_LABELS = {
+  'gifhero-balanced': 'gifhero balanced',
+  'gifhero-quality': 'gifhero quality',
+  'gifski': 'gifski (q90)',
+  'gifski-lossy': 'gifski lossy',
   'ffmpeg': 'ffmpeg',
-  'ffmpeg-hq': 'ffmpeg-hq',
-  'magick': 'magick',
-  'ffmpeg+gifsicle': 'ffmpeg+gsc',
+  'ffmpeg-hq': 'ffmpeg per-frame',
+  'magick': 'ImageMagick',
+  'ffmpeg+gifsicle': 'ffmpeg + gifsicle',
 };
 
 let DATA = null;
@@ -140,15 +142,15 @@ let activeEnc = new Set();
 let sortCol = null, sortDir = 1;
 const charts = {};
 
+// Resolution display: "native" → "480p (source)"
+function resLabel(r) { return r === 'native' ? '480p (source)' : r; }
+
 document.getElementById('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   DATA = JSON.parse(await file.text());
   loadReport();
 });
-
-// Auto-load latest if served from test server
-fetch('../bench/results/').catch(() => null);
 
 function loadReport() {
   document.getElementById('loadStatus').style.display = 'none';
@@ -160,141 +162,196 @@ function loadReport() {
   activeRes = new Set(resolutions);
   activeEnc = new Set(encoders);
 
-  renderStats(r, encoders);
+  // Meta line
+  const fixtures = [...new Set(r.map(x => x.fixture))];
+  document.getElementById('metaLine').textContent =
+    `${fixtures.length} fixtures · ${resolutions.length} resolutions · ${encoders.length} encoders · ${r.length} total runs · ${DATA.timestamp?.slice(0, 10) || ''}`;
+
+  renderStats(r);
   renderCharts(r, encoders, resolutions);
   renderFilters(resolutions, encoders);
   renderTable(r);
 }
 
-function renderStats(r, encoders) {
-  const native = r.filter(x => x.resolution === 'native');
-  const hb = native.filter(x => x.encoder === 'gifhero-balanced' && x.vmafMean != null);
-  const gs = native.filter(x => x.encoder === 'gifski' && x.vmafMean != null);
+function renderStats(r) {
+  const src = r.filter(x => x.resolution === 'native');
+  const hb = src.filter(x => x.encoder === 'gifhero-balanced' && x.vmafMean != null);
+  const gs = src.filter(x => x.encoder === 'gifski' && x.vmafMean != null);
+  if (!hb.length || !gs.length) return;
 
   const hbTotal = hb.reduce((s,x) => s + x.fileSize, 0);
   const gsTotal = gs.reduce((s,x) => s + x.fileSize, 0);
-  const sizeDelta = ((1 - hbTotal / gsTotal) * 100).toFixed(0);
-  const vmafDelta = ((hb.reduce((s,x) => s + x.vmafMean,0)/hb.length) - (gs.reduce((s,x) => s + x.vmafMean,0)/gs.length)).toFixed(1);
+  const sizePct = ((1 - hbTotal / gsTotal) * 100).toFixed(0);
+  const vmafD = ((hb.reduce((s,x) => s + x.vmafMean,0)/hb.length) - (gs.reduce((s,x) => s + x.vmafMean,0)/gs.length)).toFixed(1);
   let sizeWins = 0;
   for (const h of hb) { const g = gs.find(x => x.fixture === h.fixture); if (g && h.fileSize < g.fileSize) sizeWins++; }
+  const avgBpp = hb.filter(x => x.gif?.bitsPerPixel).reduce((s,x) => s + x.gif.bitsPerPixel, 0) / hb.filter(x => x.gif?.bitsPerPixel).length;
 
   document.getElementById('statsRow').innerHTML = `
-    <div class="card stat green"><div class="num">${sizeDelta}%</div><div class="label">smaller than gifski (total file size)</div></div>
-    <div class="card stat blue"><div class="num">+${vmafDelta}</div><div class="label">VMAF advantage over gifski</div></div>
-    <div class="card stat purple"><div class="num">${sizeWins}/${hb.length}</div><div class="label">fixtures where gifhero is smaller</div></div>
-    <div class="card stat yellow"><div class="num">${r.length}</div><div class="label">total benchmark runs</div></div>
+    <div class="card stat green"><div class="num">${sizePct}%</div><div class="label">smaller than gifski</div></div>
+    <div class="card stat blue"><div class="num">+${vmafD}</div><div class="label">VMAF vs gifski</div></div>
+    <div class="card stat purple"><div class="num">${sizeWins}/${hb.length}</div><div class="label">size wins</div></div>
+    <div class="card stat yellow"><div class="num">${avgBpp.toFixed(2)}</div><div class="label">avg bits/pixel</div></div>
   `;
 }
 
+function makeChartOpts(title) {
+  return {
+    responsive: true,
+    maintainAspectRatio: true,
+    aspectRatio: 2.2,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#8b949e', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle', padding: 16 } },
+      title: { display: true, text: title, color: '#e6edf3', font: { size: 14, weight: '600' }, padding: { bottom: 12 } },
+      tooltip: { backgroundColor: '#1c2128', borderColor: '#30363d', borderWidth: 1, titleColor: '#e6edf3', bodyColor: '#8b949e', padding: 10 },
+    },
+    scales: {
+      x: { ticks: { color: '#8b949e', font: { size: 11 } }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#8b949e', font: { size: 11 } }, grid: { color: '#21262d' } },
+    },
+  };
+}
+
 function renderCharts(r, encoders, resolutions) {
-  const native = r.filter(x => x.resolution === 'native');
-  const chartOpts = { responsive: true, plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } } };
+  const src = r.filter(x => x.resolution === 'native');
 
-  // Size vs VMAF scatter
-  const scatterData = encoders.map(enc => {
-    const rows = native.filter(x => x.encoder === enc && x.vmafMean != null);
-    return { label: ENCODER_SHORT[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.vmafMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 4 };
+  // 1. Size vs VMAF
+  charts.sizeVmaf = new Chart(document.getElementById('chartSizeVmaf'), {
+    type: 'scatter',
+    data: { datasets: encoders.map(enc => {
+      const rows = src.filter(x => x.encoder === enc && x.vmafMean != null);
+      return { label: ENCODER_LABELS[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.vmafMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 5, pointHoverRadius: 7 };
+    })},
+    options: { ...makeChartOpts('File Size vs VMAF (480p source)'),
+      scales: { x: { ...makeChartOpts('').scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } },
+                y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'VMAF (higher = better)', color: '#8b949e' }, min: 85 } } },
   });
-  charts.sizeVmaf = new Chart(document.getElementById('chartSizeVmaf'), { type: 'scatter', data: { datasets: scatterData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size vs VMAF', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'VMAF', color: '#8b949e' }, min: 85 } } } });
 
-  // Size vs SSIM scatter
-  const ssimData = encoders.map(enc => {
-    const rows = native.filter(x => x.encoder === enc && x.ssimMean != null);
-    return { label: ENCODER_SHORT[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.ssimMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 4 };
+  // 2. Size vs SSIM
+  charts.sizeSsim = new Chart(document.getElementById('chartSizeSsim'), {
+    type: 'scatter',
+    data: { datasets: encoders.map(enc => {
+      const rows = src.filter(x => x.encoder === enc && x.ssimMean != null);
+      return { label: ENCODER_LABELS[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.ssimMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 5, pointHoverRadius: 7 };
+    })},
+    options: { ...makeChartOpts('File Size vs SSIM (480p source)'),
+      scales: { x: { ...makeChartOpts('').scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } },
+                y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'SSIM (higher = better)', color: '#8b949e' }, min: 0.88 } } },
   });
-  charts.sizeSsim = new Chart(document.getElementById('chartSizeSsim'), { type: 'scatter', data: { datasets: ssimData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size vs SSIM', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'SSIM', color: '#8b949e' }, min: 0.85 } } } });
 
-  // Average BPP bar chart
-  const bppEncoders = encoders.filter(e => native.some(x => x.encoder === e && x.gif?.bitsPerPixel));
-  const bppData = bppEncoders.map(enc => {
-    const rows = native.filter(x => x.encoder === enc && x.gif?.bitsPerPixel);
-    return rows.reduce((s,x) => s + x.gif.bitsPerPixel, 0) / rows.length;
+  // 3. BPP bar
+  const bppEncs = encoders.filter(e => src.some(x => x.encoder === e && x.gif?.bitsPerPixel));
+  charts.bpp = new Chart(document.getElementById('chartBpp'), {
+    type: 'bar',
+    data: { labels: bppEncs.map(e => ENCODER_LABELS[e] || e),
+      datasets: [{ data: bppEncs.map(enc => { const rows = src.filter(x => x.encoder === enc && x.gif?.bitsPerPixel); return rows.reduce((s,x) => s + x.gif.bitsPerPixel, 0) / rows.length; }),
+        backgroundColor: bppEncs.map(e => ENCODER_COLORS[e] || '#888'), borderRadius: 4 }] },
+    options: { ...makeChartOpts('Average Bits Per Pixel (lower = better)'), plugins: { ...makeChartOpts('').plugins, legend: { display: false } },
+      scales: { ...makeChartOpts('').scales, y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'BPP', color: '#8b949e' }, beginAtZero: true } } },
   });
-  charts.bpp = new Chart(document.getElementById('chartBpp'), { type: 'bar', data: { labels: bppEncoders.map(e => ENCODER_SHORT[e] || e), datasets: [{ data: bppData, backgroundColor: bppEncoders.map(e => ENCODER_COLORS[e] || '#888') }] }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false }, title: { display: true, text: 'Avg Bits Per Pixel (lower = better compression)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, title: { display: true, text: 'BPP', color: '#8b949e' } } } } });
 
-  // Size by fixture (grouped bar)
-  const fixtures = [...new Set(native.map(x => x.fixture))].sort();
-  const mainEncoders = ['gifhero-balanced', 'gifski', 'ffmpeg', 'magick'];
-  const fixtureDatasets = mainEncoders.map(enc => ({
-    label: ENCODER_SHORT[enc] || enc,
-    data: fixtures.map(f => { const row = native.find(x => x.fixture === f && x.encoder === enc); return row ? row.fileSize / 1024 : 0; }),
-    backgroundColor: ENCODER_COLORS[enc],
-  }));
-  charts.sizeByFixture = new Chart(document.getElementById('chartSizeByFixture'), { type: 'bar', data: { labels: fixtures, datasets: fixtureDatasets }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size by Fixture (KB)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, ticks: { ...chartOpts.scales.x.ticks, maxRotation: 45 } } } } });
-
-  // Speed bar chart
-  const speedData = encoders.map(enc => {
-    const rows = native.filter(x => x.encoder === enc);
-    return rows.reduce((s,x) => s + x.encodingTimeMs, 0) / rows.length;
+  // 4. Size by fixture
+  const fixtures = [...new Set(src.map(x => x.fixture))].sort();
+  const mainEncs = ['gifhero-balanced', 'gifski', 'ffmpeg', 'magick'];
+  charts.sizeByFixture = new Chart(document.getElementById('chartSizeByFixture'), {
+    type: 'bar',
+    data: { labels: fixtures, datasets: mainEncs.map(enc => ({
+      label: ENCODER_LABELS[enc] || enc,
+      data: fixtures.map(f => { const row = src.find(x => x.fixture === f && x.encoder === enc); return row ? row.fileSize / 1024 : 0; }),
+      backgroundColor: ENCODER_COLORS[enc], borderRadius: 2,
+    }))},
+    options: { ...makeChartOpts('File Size by Fixture (KB)'), aspectRatio: 1.8,
+      scales: { ...makeChartOpts('').scales, x: { ...makeChartOpts('').scales.x, ticks: { ...makeChartOpts('').scales.x.ticks, maxRotation: 50, minRotation: 30 } } } },
   });
-  charts.speed = new Chart(document.getElementById('chartSpeed'), { type: 'bar', data: { labels: encoders.map(e => ENCODER_SHORT[e] || e), datasets: [{ data: speedData, backgroundColor: encoders.map(e => ENCODER_COLORS[e] || '#888') }] }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false }, title: { display: true, text: 'Avg Encoding Time (ms, lower = faster)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, title: { display: true, text: 'ms', color: '#8b949e' } } } } });
 
-  // Speed vs Size scatter
-  const speedSizeData = encoders.map(enc => {
-    const rows = native.filter(x => x.encoder === enc && x.vmafMean != null);
-    const avgSize = rows.reduce((s,x) => s + x.fileSize, 0) / rows.length / 1024;
-    const avgTime = rows.reduce((s,x) => s + x.encodingTimeMs, 0) / rows.length;
-    return { label: ENCODER_SHORT[enc] || enc, data: [{ x: avgTime, y: avgSize }], backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 8 };
+  // 5. Speed bar
+  charts.speed = new Chart(document.getElementById('chartSpeed'), {
+    type: 'bar',
+    data: { labels: encoders.map(e => ENCODER_LABELS[e] || e),
+      datasets: [{ data: encoders.map(enc => { const rows = src.filter(x => x.encoder === enc); return rows.reduce((s,x) => s + x.encodingTimeMs, 0) / rows.length; }),
+        backgroundColor: encoders.map(e => ENCODER_COLORS[e] || '#888'), borderRadius: 4 }] },
+    options: { ...makeChartOpts('Average Encoding Time (lower = faster)'), plugins: { ...makeChartOpts('').plugins, legend: { display: false } },
+      scales: { ...makeChartOpts('').scales, y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'ms', color: '#8b949e' }, beginAtZero: true } } },
   });
-  charts.speedVsSize = new Chart(document.getElementById('chartSpeedVsSize'), { type: 'scatter', data: { datasets: speedSizeData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Speed vs Size Trade-off', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'Avg Encode Time (ms)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'Avg File Size (KB)', color: '#8b949e' } } } } });
 
-  // Resolution scaling (line chart)
-  const resLabels = resolutions.filter(r => r !== 'native').sort();
-  resLabels.unshift('native');
-  const resEncoders = ['gifhero-balanced', 'gifhero-quality', 'gifski', 'gifski-lossy'];
-  const resDatasets = resEncoders.map(enc => ({
-    label: ENCODER_SHORT[enc] || enc,
-    data: resLabels.map(res => {
-      const rows = r.filter(x => x.encoder === enc && x.resolution === res && x.vmafMean != null);
-      return rows.length ? rows.reduce((s,x) => s + x.fileSize, 0) / rows.length / 1024 : null;
-    }),
-    borderColor: ENCODER_COLORS[enc],
-    backgroundColor: ENCODER_COLORS[enc] + '33',
-    tension: 0.3,
-    fill: false,
-  }));
-  charts.resolution = new Chart(document.getElementById('chartResolution'), { type: 'line', data: { labels: resLabels, datasets: resDatasets }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Average File Size by Resolution', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'Resolution', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'Avg Size (KB)', color: '#8b949e' } } } } });
+  // 6. Speed vs Size
+  charts.speedVsSize = new Chart(document.getElementById('chartSpeedVsSize'), {
+    type: 'scatter',
+    data: { datasets: encoders.map(enc => {
+      const rows = src.filter(x => x.encoder === enc && x.vmafMean != null);
+      if (!rows.length) return null;
+      return { label: ENCODER_LABELS[enc] || enc, data: [{ x: rows.reduce((s,x) => s + x.encodingTimeMs,0)/rows.length, y: rows.reduce((s,x) => s + x.fileSize,0)/rows.length/1024 }],
+        backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 10, pointHoverRadius: 13 };
+    }).filter(Boolean)},
+    options: { ...makeChartOpts('Speed vs Size (lower-left = ideal)'),
+      scales: { x: { ...makeChartOpts('').scales.x, title: { display: true, text: 'Avg Encode Time (ms)', color: '#8b949e' } },
+                y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'Avg File Size (KB)', color: '#8b949e' } } } },
+  });
+
+  // 7. Resolution scaling
+  const resOrder = ['native', '360p', '240p', '160p'].filter(r => resolutions.includes(r));
+  const resEncs = ['gifhero-balanced', 'gifhero-quality', 'gifski', 'gifski-lossy'];
+  charts.resolution = new Chart(document.getElementById('chartResolution'), {
+    type: 'line',
+    data: { labels: resOrder.map(resLabel),
+      datasets: resEncs.map(enc => ({
+        label: ENCODER_LABELS[enc] || enc,
+        data: resOrder.map(res => { const rows = r.filter(x => x.encoder === enc && x.resolution === res && x.vmafMean != null); return rows.length ? rows.reduce((s,x) => s + x.fileSize,0)/rows.length/1024 : null; }),
+        borderColor: ENCODER_COLORS[enc], backgroundColor: ENCODER_COLORS[enc] + '22',
+        tension: 0.3, fill: false, pointRadius: 5, borderWidth: 2,
+      }))},
+    options: { ...makeChartOpts('Average File Size by Output Resolution'),
+      scales: { x: { ...makeChartOpts('').scales.x, title: { display: true, text: 'Output Resolution', color: '#8b949e' } },
+                y: { ...makeChartOpts('').scales.y, title: { display: true, text: 'Avg Size (KB)', color: '#8b949e' }, beginAtZero: true } } },
+  });
 }
 
 // Filters
 function renderFilters(resolutions, encoders) {
   const resDiv = document.getElementById('resFilters');
-  resDiv.innerHTML = resolutions.map(r => `<span class="chip active" data-res="${r}">${r}</span>`).join('');
-  resDiv.addEventListener('click', e => { if (e.target.classList.contains('chip')) { e.target.classList.toggle('active'); activeRes = new Set([...resDiv.querySelectorAll('.chip.active')].map(c => c.dataset.res)); renderTable(DATA.results); } });
+  resDiv.innerHTML = resolutions.map(r => `<span class="chip active" data-res="${r}">${resLabel(r)}</span>`).join('');
+  resDiv.addEventListener('click', e => {
+    if (!e.target.classList.contains('chip')) return;
+    e.target.classList.toggle('active');
+    activeRes = new Set([...resDiv.querySelectorAll('.chip.active')].map(c => c.dataset.res));
+    renderTable(DATA.results);
+  });
 
   const encDiv = document.getElementById('encFilters');
-  encDiv.innerHTML = encoders.map(e => `<span class="chip active" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_SHORT[e] || e}</span>`).join('');
-  encDiv.addEventListener('click', e => { if (e.target.classList.contains('chip')) { e.target.classList.toggle('active'); activeEnc = new Set([...encDiv.querySelectorAll('.chip.active')].map(c => c.dataset.enc)); renderTable(DATA.results); } });
+  encDiv.innerHTML = encoders.map(e => `<span class="chip active" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_LABELS[e] || e}</span>`).join('');
+  encDiv.addEventListener('click', e => {
+    if (!e.target.classList.contains('chip')) return;
+    e.target.classList.toggle('active');
+    activeEnc = new Set([...encDiv.querySelectorAll('.chip.active')].map(c => c.dataset.enc));
+    renderTable(DATA.results);
+  });
 }
 
-// Sortable table
+// Table
 const COLUMNS = [
-  { key: 'fixture', label: 'Fixture', fmt: v => v },
-  { key: 'resolution', label: 'Res', fmt: v => v },
-  { key: 'encoder', label: 'Encoder', fmt: (v, row) => `<span style="color:${ENCODER_COLORS[v] || '#888'}">●</span> ${ENCODER_SHORT[v] || v}` },
-  { key: 'fileSize', label: 'Size', fmt: v => v != null ? `<span class="bar" style="width:${Math.min(100, v/1024/12*100)}px;background:var(--accent)"></span>${(v/1024).toFixed(0)} KB` : '' },
-  { key: 'encodingTimeMs', label: 'Time', fmt: v => v != null ? (v < 1000 ? v + 'ms' : (v/1000).toFixed(1) + 's') : '' },
+  { key: 'fixture', label: 'Fixture', fmt: v => v || '' },
+  { key: 'resolution', label: 'Resolution', fmt: v => resLabel(v) },
+  { key: 'encoder', label: 'Encoder', fmt: (v) => `<span style="color:${ENCODER_COLORS[v] || '#888'}; font-size:1.1em">●</span> ${ENCODER_LABELS[v] || v}` },
+  { key: 'fileSize', label: 'Size', fmt: v => v != null ? `<span class="bar" style="width:${Math.min(80, v/1024/14*80)}px;background:var(--accent)"></span>${(v/1024).toFixed(0)} KB` : '' },
+  { key: 'encodingTimeMs', label: 'Encode Time', fmt: v => v != null ? (v < 1000 ? v + 'ms' : (v/1000).toFixed(1) + 's') : '' },
   { key: 'vmafMean', label: 'VMAF', fmt: v => v != null ? v.toFixed(1) : '' },
   { key: 'ssimMean', label: 'SSIM', fmt: v => v != null ? v.toFixed(4) : '' },
   { key: 'dssimMean', label: 'DSSIM', fmt: v => v != null ? v.toFixed(4) : '' },
-  { key: 'gif.avgPaletteSize', label: 'Palette', fmt: v => v != null ? v : '' },
+  { key: 'gif.avgPaletteSize', label: 'Palette', fmt: v => v != null && v > 0 ? v : '' },
   { key: 'gif.bitsPerPixel', label: 'BPP', fmt: v => v != null ? v.toFixed(3) : '' },
-  { key: 'gif.subFrameCount', label: 'Sub-frames', fmt: (v, row) => { const g = row.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
-  { key: 'gif.avgSubFrameCoverage', label: 'Coverage', fmt: v => v != null ? (v * 100).toFixed(0) + '%' : '' },
+  { key: 'gif.subFrameCount', label: 'Sub-frames', fmt: (v, row) => { const g = row?.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
+  { key: 'gif.avgSubFrameCoverage', label: 'Coverage', fmt: v => v != null && v > 0 ? (v * 100).toFixed(0) + '%' : '' },
 ];
 
-function getNestedValue(obj, path) {
-  return path.split('.').reduce((o, k) => o?.[k], obj);
-}
+function getVal(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
 
 function renderTable(allResults) {
   const filtered = allResults.filter(x => activeRes.has(x.resolution) && activeEnc.has(x.encoder));
 
-  // Header
   const head = document.getElementById('tableHead');
   head.innerHTML = COLUMNS.map((col, i) => {
     const sorted = sortCol === i;
-    const arrow = sorted ? (sortDir > 0 ? '▲' : '▼') : '▲';
+    const arrow = sorted ? (sortDir > 0 ? '▲' : '▼') : '⇅';
     return `<th class="${sorted ? 'sorted' : ''}" data-col="${i}">${col.label} <span class="arrow">${arrow}</span></th>`;
   }).join('');
 
@@ -307,11 +364,10 @@ function renderTable(allResults) {
     });
   });
 
-  // Sort
   if (sortCol !== null) {
     const key = COLUMNS[sortCol].key;
     filtered.sort((a, b) => {
-      let va = getNestedValue(a, key), vb = getNestedValue(b, key);
+      let va = getVal(a, key), vb = getVal(b, key);
       if (va == null) va = sortDir > 0 ? Infinity : -Infinity;
       if (vb == null) vb = sortDir > 0 ? Infinity : -Infinity;
       if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
@@ -319,11 +375,9 @@ function renderTable(allResults) {
     });
   }
 
-  // Body
-  const body = document.getElementById('tableBody');
-  body.innerHTML = filtered.map(row => {
-    const isHero = row.encoder.startsWith('gifhero');
-    return `<tr class="${isHero ? 'highlight' : ''}">${COLUMNS.map(col => `<td>${col.fmt(getNestedValue(row, col.key), row)}</td>`).join('')}</tr>`;
+  document.getElementById('tableBody').innerHTML = filtered.map(row => {
+    const hl = row.encoder?.startsWith('gifhero') ? ' highlight' : '';
+    return `<tr class="${hl}">${COLUMNS.map(col => `<td>${col.fmt(getVal(row, col.key), row)}</td>`).join('')}</tr>`;
   }).join('');
 }
 </script>
