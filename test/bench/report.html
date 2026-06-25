@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gifhero Benchmark Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+    --orange: #d18616;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 24px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 2rem; margin-bottom: 8px; }
+  h2 { font-size: 1.4rem; margin: 32px 0 12px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  h3 { font-size: 1.1rem; margin: 20px 0 8px; color: var(--text2); }
+  p, .desc { color: var(--text2); font-size: 0.9rem; margin-bottom: 12px; }
+  .subtitle { font-size: 1rem; color: var(--text2); margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 900px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card canvas { width: 100% !important; height: auto !important; }
+  .stat { text-align: center; padding: 20px; }
+  .stat .num { font-size: 2.2rem; font-weight: 700; }
+  .stat .label { font-size: 0.85rem; color: var(--text2); }
+  .stat.green .num { color: var(--green); }
+  .stat.blue .num { color: var(--accent); }
+  .stat.purple .num { color: var(--purple); }
+  .stat.yellow .num { color: var(--yellow); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge.win { background: #1a3a2a; color: var(--green); }
+  .badge.loss { background: #3a1a1a; color: var(--red); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px; }
+  th { background: var(--surface); color: var(--text2); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { color: var(--accent); }
+  th .arrow { font-size: 0.65rem; margin-left: 4px; opacity: 0.4; }
+  th.sorted .arrow { opacity: 1; color: var(--accent); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(88,166,255,0.05); }
+  tr.highlight td { background: rgba(63,185,80,0.08); }
+
+  .bar { display: inline-block; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 6px; min-width: 2px; }
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .filter-row label { font-size: 0.8rem; color: var(--text2); }
+  .filter-row select, .filter-row input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 0.8rem; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--border); margin: 2px; }
+  .chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .chip:hover { border-color: var(--accent); }
+  #loadStatus { text-align: center; padding: 40px; color: var(--text2); }
+</style>
+</head>
+<body>
+<h1>gifhero Benchmark Report</h1>
+<p class="subtitle">
+  Interactive analysis of GIF encoder quality, compression, and speed.
+  <br>Click column headers to sort. Use filters to focus on specific encoders or fixtures.
+</p>
+
+<div id="loadStatus">
+  <p>Drop a benchmark JSON file here, or select one:</p>
+  <input type="file" id="fileInput" accept=".json" style="margin-top: 12px;">
+  <p style="margin-top: 8px; font-size: 0.8rem;">Files are in <code>test/bench/results/</code></p>
+</div>
+
+<div id="report" style="display:none;">
+
+<!-- Key stats -->
+<div class="grid" id="statsRow"></div>
+
+<!-- Charts -->
+<h2>Quality vs Size</h2>
+<div class="grid">
+  <div class="card"><canvas id="chartSizeVmaf"></canvas></div>
+  <div class="card"><canvas id="chartSizeSsim"></canvas></div>
+</div>
+
+<h2>Compression Efficiency</h2>
+<div class="grid">
+  <div class="card"><canvas id="chartBpp"></canvas></div>
+  <div class="card"><canvas id="chartSizeByFixture"></canvas></div>
+</div>
+
+<h2>Encoding Speed</h2>
+<div class="grid">
+  <div class="card"><canvas id="chartSpeed"></canvas></div>
+  <div class="card"><canvas id="chartSpeedVsSize"></canvas></div>
+</div>
+
+<h2>Resolution Scaling</h2>
+<div class="card"><canvas id="chartResolution"></canvas></div>
+
+<!-- Full data table -->
+<h2>Full Results</h2>
+<div class="filter-row">
+  <label>Resolution:</label>
+  <div id="resFilters"></div>
+  <label style="margin-left: 12px;">Encoder:</label>
+  <div id="encFilters"></div>
+</div>
+<div style="overflow-x: auto;">
+  <table id="resultsTable">
+    <thead><tr id="tableHead"></tr></thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+</div>
+
+<script>
+const ENCODER_COLORS = {
+  'gifhero-balanced': '#3fb950',
+  'gifhero-quality': '#58a6ff',
+  'gifski': '#d29922',
+  'gifski-lossy': '#d18616',
+  'ffmpeg': '#f85149',
+  'ffmpeg-hq': '#ff7b72',
+  'magick': '#bc8cff',
+  'ffmpeg+gifsicle': '#8b949e',
+};
+const ENCODER_SHORT = {
+  'gifhero-balanced': 'gifhero bal',
+  'gifhero-quality': 'gifhero q',
+  'gifski': 'gifski',
+  'gifski-lossy': 'gifski-lossy',
+  'ffmpeg': 'ffmpeg',
+  'ffmpeg-hq': 'ffmpeg-hq',
+  'magick': 'magick',
+  'ffmpeg+gifsicle': 'ffmpeg+gsc',
+};
+
+let DATA = null;
+let activeRes = new Set();
+let activeEnc = new Set();
+let sortCol = null, sortDir = 1;
+const charts = {};
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  DATA = JSON.parse(await file.text());
+  loadReport();
+});
+
+// Auto-load latest if served from test server
+fetch('../bench/results/').catch(() => null);
+
+function loadReport() {
+  document.getElementById('loadStatus').style.display = 'none';
+  document.getElementById('report').style.display = 'block';
+
+  const r = DATA.results;
+  const resolutions = [...new Set(r.map(x => x.resolution))];
+  const encoders = [...new Set(r.map(x => x.encoder))];
+  activeRes = new Set(resolutions);
+  activeEnc = new Set(encoders);
+
+  renderStats(r, encoders);
+  renderCharts(r, encoders, resolutions);
+  renderFilters(resolutions, encoders);
+  renderTable(r);
+}
+
+function renderStats(r, encoders) {
+  const native = r.filter(x => x.resolution === 'native');
+  const hb = native.filter(x => x.encoder === 'gifhero-balanced' && x.vmafMean != null);
+  const gs = native.filter(x => x.encoder === 'gifski' && x.vmafMean != null);
+
+  const hbTotal = hb.reduce((s,x) => s + x.fileSize, 0);
+  const gsTotal = gs.reduce((s,x) => s + x.fileSize, 0);
+  const sizeDelta = ((1 - hbTotal / gsTotal) * 100).toFixed(0);
+  const vmafDelta = ((hb.reduce((s,x) => s + x.vmafMean,0)/hb.length) - (gs.reduce((s,x) => s + x.vmafMean,0)/gs.length)).toFixed(1);
+  let sizeWins = 0;
+  for (const h of hb) { const g = gs.find(x => x.fixture === h.fixture); if (g && h.fileSize < g.fileSize) sizeWins++; }
+
+  document.getElementById('statsRow').innerHTML = `
+    <div class="card stat green"><div class="num">${sizeDelta}%</div><div class="label">smaller than gifski (total file size)</div></div>
+    <div class="card stat blue"><div class="num">+${vmafDelta}</div><div class="label">VMAF advantage over gifski</div></div>
+    <div class="card stat purple"><div class="num">${sizeWins}/${hb.length}</div><div class="label">fixtures where gifhero is smaller</div></div>
+    <div class="card stat yellow"><div class="num">${r.length}</div><div class="label">total benchmark runs</div></div>
+  `;
+}
+
+function renderCharts(r, encoders, resolutions) {
+  const native = r.filter(x => x.resolution === 'native');
+  const chartOpts = { responsive: true, plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } } };
+
+  // Size vs VMAF scatter
+  const scatterData = encoders.map(enc => {
+    const rows = native.filter(x => x.encoder === enc && x.vmafMean != null);
+    return { label: ENCODER_SHORT[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.vmafMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 4 };
+  });
+  charts.sizeVmaf = new Chart(document.getElementById('chartSizeVmaf'), { type: 'scatter', data: { datasets: scatterData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size vs VMAF', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'VMAF', color: '#8b949e' }, min: 85 } } } });
+
+  // Size vs SSIM scatter
+  const ssimData = encoders.map(enc => {
+    const rows = native.filter(x => x.encoder === enc && x.ssimMean != null);
+    return { label: ENCODER_SHORT[enc] || enc, data: rows.map(x => ({ x: x.fileSize/1024, y: x.ssimMean })), backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 4 };
+  });
+  charts.sizeSsim = new Chart(document.getElementById('chartSizeSsim'), { type: 'scatter', data: { datasets: ssimData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size vs SSIM', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'File Size (KB)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'SSIM', color: '#8b949e' }, min: 0.85 } } } });
+
+  // Average BPP bar chart
+  const bppEncoders = encoders.filter(e => native.some(x => x.encoder === e && x.gif?.bitsPerPixel));
+  const bppData = bppEncoders.map(enc => {
+    const rows = native.filter(x => x.encoder === enc && x.gif?.bitsPerPixel);
+    return rows.reduce((s,x) => s + x.gif.bitsPerPixel, 0) / rows.length;
+  });
+  charts.bpp = new Chart(document.getElementById('chartBpp'), { type: 'bar', data: { labels: bppEncoders.map(e => ENCODER_SHORT[e] || e), datasets: [{ data: bppData, backgroundColor: bppEncoders.map(e => ENCODER_COLORS[e] || '#888') }] }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false }, title: { display: true, text: 'Avg Bits Per Pixel (lower = better compression)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, title: { display: true, text: 'BPP', color: '#8b949e' } } } } });
+
+  // Size by fixture (grouped bar)
+  const fixtures = [...new Set(native.map(x => x.fixture))].sort();
+  const mainEncoders = ['gifhero-balanced', 'gifski', 'ffmpeg', 'magick'];
+  const fixtureDatasets = mainEncoders.map(enc => ({
+    label: ENCODER_SHORT[enc] || enc,
+    data: fixtures.map(f => { const row = native.find(x => x.fixture === f && x.encoder === enc); return row ? row.fileSize / 1024 : 0; }),
+    backgroundColor: ENCODER_COLORS[enc],
+  }));
+  charts.sizeByFixture = new Chart(document.getElementById('chartSizeByFixture'), { type: 'bar', data: { labels: fixtures, datasets: fixtureDatasets }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'File Size by Fixture (KB)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, ticks: { ...chartOpts.scales.x.ticks, maxRotation: 45 } } } } });
+
+  // Speed bar chart
+  const speedData = encoders.map(enc => {
+    const rows = native.filter(x => x.encoder === enc);
+    return rows.reduce((s,x) => s + x.encodingTimeMs, 0) / rows.length;
+  });
+  charts.speed = new Chart(document.getElementById('chartSpeed'), { type: 'bar', data: { labels: encoders.map(e => ENCODER_SHORT[e] || e), datasets: [{ data: speedData, backgroundColor: encoders.map(e => ENCODER_COLORS[e] || '#888') }] }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false }, title: { display: true, text: 'Avg Encoding Time (ms, lower = faster)', color: '#e6edf3' } }, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, title: { display: true, text: 'ms', color: '#8b949e' } } } } });
+
+  // Speed vs Size scatter
+  const speedSizeData = encoders.map(enc => {
+    const rows = native.filter(x => x.encoder === enc && x.vmafMean != null);
+    const avgSize = rows.reduce((s,x) => s + x.fileSize, 0) / rows.length / 1024;
+    const avgTime = rows.reduce((s,x) => s + x.encodingTimeMs, 0) / rows.length;
+    return { label: ENCODER_SHORT[enc] || enc, data: [{ x: avgTime, y: avgSize }], backgroundColor: ENCODER_COLORS[enc] || '#888', pointRadius: 8 };
+  });
+  charts.speedVsSize = new Chart(document.getElementById('chartSpeedVsSize'), { type: 'scatter', data: { datasets: speedSizeData }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Speed vs Size Trade-off', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'Avg Encode Time (ms)', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'Avg File Size (KB)', color: '#8b949e' } } } } });
+
+  // Resolution scaling (line chart)
+  const resLabels = resolutions.filter(r => r !== 'native').sort();
+  resLabels.unshift('native');
+  const resEncoders = ['gifhero-balanced', 'gifhero-quality', 'gifski', 'gifski-lossy'];
+  const resDatasets = resEncoders.map(enc => ({
+    label: ENCODER_SHORT[enc] || enc,
+    data: resLabels.map(res => {
+      const rows = r.filter(x => x.encoder === enc && x.resolution === res && x.vmafMean != null);
+      return rows.length ? rows.reduce((s,x) => s + x.fileSize, 0) / rows.length / 1024 : null;
+    }),
+    borderColor: ENCODER_COLORS[enc],
+    backgroundColor: ENCODER_COLORS[enc] + '33',
+    tension: 0.3,
+    fill: false,
+  }));
+  charts.resolution = new Chart(document.getElementById('chartResolution'), { type: 'line', data: { labels: resLabels, datasets: resDatasets }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Average File Size by Resolution', color: '#e6edf3' } }, scales: { x: { ...chartOpts.scales.x, title: { display: true, text: 'Resolution', color: '#8b949e' } }, y: { ...chartOpts.scales.y, title: { display: true, text: 'Avg Size (KB)', color: '#8b949e' } } } } });
+}
+
+// Filters
+function renderFilters(resolutions, encoders) {
+  const resDiv = document.getElementById('resFilters');
+  resDiv.innerHTML = resolutions.map(r => `<span class="chip active" data-res="${r}">${r}</span>`).join('');
+  resDiv.addEventListener('click', e => { if (e.target.classList.contains('chip')) { e.target.classList.toggle('active'); activeRes = new Set([...resDiv.querySelectorAll('.chip.active')].map(c => c.dataset.res)); renderTable(DATA.results); } });
+
+  const encDiv = document.getElementById('encFilters');
+  encDiv.innerHTML = encoders.map(e => `<span class="chip active" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_SHORT[e] || e}</span>`).join('');
+  encDiv.addEventListener('click', e => { if (e.target.classList.contains('chip')) { e.target.classList.toggle('active'); activeEnc = new Set([...encDiv.querySelectorAll('.chip.active')].map(c => c.dataset.enc)); renderTable(DATA.results); } });
+}
+
+// Sortable table
+const COLUMNS = [
+  { key: 'fixture', label: 'Fixture', fmt: v => v },
+  { key: 'resolution', label: 'Res', fmt: v => v },
+  { key: 'encoder', label: 'Encoder', fmt: (v, row) => `<span style="color:${ENCODER_COLORS[v] || '#888'}">●</span> ${ENCODER_SHORT[v] || v}` },
+  { key: 'fileSize', label: 'Size', fmt: v => v != null ? `<span class="bar" style="width:${Math.min(100, v/1024/12*100)}px;background:var(--accent)"></span>${(v/1024).toFixed(0)} KB` : '' },
+  { key: 'encodingTimeMs', label: 'Time', fmt: v => v != null ? (v < 1000 ? v + 'ms' : (v/1000).toFixed(1) + 's') : '' },
+  { key: 'vmafMean', label: 'VMAF', fmt: v => v != null ? v.toFixed(1) : '' },
+  { key: 'ssimMean', label: 'SSIM', fmt: v => v != null ? v.toFixed(4) : '' },
+  { key: 'dssimMean', label: 'DSSIM', fmt: v => v != null ? v.toFixed(4) : '' },
+  { key: 'gif.avgPaletteSize', label: 'Palette', fmt: v => v != null ? v : '' },
+  { key: 'gif.bitsPerPixel', label: 'BPP', fmt: v => v != null ? v.toFixed(3) : '' },
+  { key: 'gif.subFrameCount', label: 'Sub-frames', fmt: (v, row) => { const g = row.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
+  { key: 'gif.avgSubFrameCoverage', label: 'Coverage', fmt: v => v != null ? (v * 100).toFixed(0) + '%' : '' },
+];
+
+function getNestedValue(obj, path) {
+  return path.split('.').reduce((o, k) => o?.[k], obj);
+}
+
+function renderTable(allResults) {
+  const filtered = allResults.filter(x => activeRes.has(x.resolution) && activeEnc.has(x.encoder));
+
+  // Header
+  const head = document.getElementById('tableHead');
+  head.innerHTML = COLUMNS.map((col, i) => {
+    const sorted = sortCol === i;
+    const arrow = sorted ? (sortDir > 0 ? '▲' : '▼') : '▲';
+    return `<th class="${sorted ? 'sorted' : ''}" data-col="${i}">${col.label} <span class="arrow">${arrow}</span></th>`;
+  }).join('');
+
+  head.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = parseInt(th.dataset.col);
+      if (sortCol === col) sortDir *= -1;
+      else { sortCol = col; sortDir = 1; }
+      renderTable(allResults);
+    });
+  });
+
+  // Sort
+  if (sortCol !== null) {
+    const key = COLUMNS[sortCol].key;
+    filtered.sort((a, b) => {
+      let va = getNestedValue(a, key), vb = getNestedValue(b, key);
+      if (va == null) va = sortDir > 0 ? Infinity : -Infinity;
+      if (vb == null) vb = sortDir > 0 ? Infinity : -Infinity;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+  }
+
+  // Body
+  const body = document.getElementById('tableBody');
+  body.innerHTML = filtered.map(row => {
+    const isHero = row.encoder.startsWith('gifhero');
+    return `<tr class="${isHero ? 'highlight' : ''}">${COLUMNS.map(col => `<td>${col.fmt(getNestedValue(row, col.key), row)}</td>`).join('')}</tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
