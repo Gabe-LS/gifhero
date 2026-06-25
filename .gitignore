@@ -19,3 +19,7 @@ Thumbs.db
 *.swp
 *.swo
 packages/imagequant-gif-wasm/target/
+packages/gifhero-core/target/
+
+# Browser test pre-built assets (not source-controlled)
+test/browser/dist/
