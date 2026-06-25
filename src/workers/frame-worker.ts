@@ -11,10 +11,10 @@
  */
 
 import { parentPort } from "worker_threads";
-import { downsample } from "../resize.js";
 import {
   remapWithPalette as gifRemapPalette,
   quantizeSimple as gifQuantSimple,
+  downsampleWasm,
 } from "../quantizers/imagequant-gif.js";
 
 interface DownsampleTask {
@@ -46,7 +46,7 @@ interface QuantizeTask {
 parentPort!.on("message", (task: DownsampleTask | QuantizeTask) => {
   if (task.type === "downsample") {
     const src = new Uint8ClampedArray(task.frameBuffer);
-    const result = downsample(src, task.srcW, task.srcH, task.dstW, task.dstH);
+    const result = downsampleWasm(src, task.srcW, task.srcH, task.dstW, task.dstH);
     const buf = result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength);
     parentPort!.postMessage({ id: task.id, buffer: buf }, [buf]);
   } else if (task.type === "quantize") {

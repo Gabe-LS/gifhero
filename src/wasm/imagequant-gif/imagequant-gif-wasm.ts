@@ -230,3 +230,20 @@ export function remap_with_palette(
     return QuantResultImpl.__wrap(r0);
   } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
 }
+
+export function downsample_lanczos3(
+  src: Uint8Array, srcW: number, srcH: number,
+  dstW: number, dstH: number,
+): Uint8Array {
+  ensureWasm();
+  const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+  try {
+    const p0 = passArray8(src), l0 = WASM_VECTOR_LEN;
+    wasm.downsample_lanczos3(retptr, p0, l0, srcW, srcH, dstW, dstH);
+    const r0 = getDataView().getInt32(retptr, true);
+    const r1 = getDataView().getInt32(retptr + 4, true);
+    const v = getArrayU8(r0, r1).slice();
+    wasm.__wbindgen_export2(r0, r1, 1);
+    return v;
+  } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+}

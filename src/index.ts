@@ -37,12 +37,14 @@ import {
 import type { PaletteStrategy } from "./optimize/index.js";
 import { probeFrames, IncrementalProbe } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
-import { resizeFrames } from "./resize.js";
+// Pure-JS Lanczos3 re-exported for external consumers; internal
+// pipeline uses the WASM version (downsampleWasm) from imagequant-gif.
 import {
   quantizeWithBackground as gifQuantBg,
   quantizeSimple as gifQuantSimple,
   buildSharedPalette as gifBuildPalette,
   remapWithPalette as gifRemapPalette,
+  downsampleWasm,
 } from "./quantizers/imagequant-gif.js";
 import type { GifQuantResult } from "./quantizers/imagequant-gif.js";
 
@@ -318,19 +320,17 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     throw new Error("At least one frame is required");
   }
 
-  // ── Downscale if requested ──
+  // ── Downscale if requested (WASM Lanczos3) ──
   const srcWidth = width;
   if (options.targetWidth && options.targetWidth < width) {
-    const resized = resizeFrames(
-      frames, width, height,
-      options.targetWidth, options.targetHeight,
-    );
-    width = resized.width;
-    height = resized.height;
-    frames = resized.frames.map((f) => ({
-      data: f.data,
+    const dstW = options.targetWidth;
+    const dstH = options.targetHeight ?? Math.floor(height * (dstW / width));
+    frames = frames.map((f) => ({
+      data: downsampleWasm(f.data, width, height, dstW, dstH),
       delay: f.delay ?? (frames[0]?.delay ?? 100),
     }));
+    width = dstW;
+    height = dstH;
   }
   const downscaleRatio = srcWidth / width;
 

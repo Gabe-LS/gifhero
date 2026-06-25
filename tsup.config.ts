@@ -29,4 +29,12 @@ export default defineConfig([
     external: ["fs", "module", "path", "zlib"],
     splitting: false,
   },
+  {
+    entry: { "gifski-mt-video-worker": "test/browser/gifski-mt-video-worker.ts" },
+    format: ["esm"],
+    outDir: "test/browser/dist",
+    noExternal: [/mediabunny/],
+    external: ["fs", "module", "path", "zlib"],
+    splitting: false,
+  },
 ]);

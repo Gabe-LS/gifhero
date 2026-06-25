@@ -125,10 +125,103 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // ── /api/gifhero endpoint ──
+  if (req.method === "POST" && req.url === "/api/gifhero") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = Buffer.concat(chunks);
+
+    const contentType = req.headers["content-type"] ?? "";
+    const boundaryMatch = contentType.match(/boundary=(.+)/);
+    if (!boundaryMatch) { res.writeHead(400); res.end("No boundary"); return; }
+
+    const boundary = boundaryMatch[1];
+    const parts = body.toString("binary").split(`--${boundary}`);
+    let videoData: Buffer | null = null;
+    let fps = "20";
+    let width = "480";
+    let preset = "balanced";
+    let fileExt = ".mp4";
+
+    for (const part of parts) {
+      if (part.includes('name="video"')) {
+        const headerEnd = part.indexOf("\r\n\r\n");
+        if (headerEnd < 0) continue;
+        const header = part.slice(0, headerEnd);
+        const filenameMatch = header.match(/filename="([^"]+)"/);
+        if (filenameMatch) fileExt = extname(filenameMatch[1]) || ".mp4";
+        const binaryData = part.slice(headerEnd + 4);
+        const trimmed = binaryData.endsWith("\r\n") ? binaryData.slice(0, -2) : binaryData;
+        videoData = Buffer.from(trimmed, "binary");
+      } else if (part.includes('name="fps"')) {
+        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
+        if (val) fps = val;
+      } else if (part.includes('name="width"')) {
+        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
+        if (val) width = val;
+      } else if (part.includes('name="preset"')) {
+        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
+        if (val) preset = val;
+      }
+    }
+
+    if (!videoData) { res.writeHead(400); res.end("No video file"); return; }
+
+    const tmpDir = join(tmpdir(), "gifhero-cli-bench-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const inputPath = join(tmpDir, `input${fileExt}`);
+    const outputPath = join(tmpDir, "output.gif");
+
+    writeFileSync(inputPath, videoData);
+
+    const gifheroBin = join(import.meta.dirname, "../../packages/gifhero-core/target/release/gifhero");
+
+    try {
+      const t0 = Date.now();
+
+      // Probe video dimensions to compute target width (longest dimension = width param)
+      const probeOut = execSync(
+        `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "${inputPath}"`,
+        { timeout: 10000 },
+      ).toString().trim();
+      const [srcW, srcH] = probeOut.split("x").map(Number);
+      const longestSrc = Math.max(srcW, srcH);
+      const targetW = Math.round(srcW * Math.min(1, parseInt(width) / longestSrc));
+
+      execSync(
+        `"${gifheroBin}" "${inputPath}" -w ${targetW} --fps ${fps} --max-duration 20 --preset ${preset} -o "${outputPath}" -q`,
+        { stdio: "ignore", timeout: 120000 },
+      );
+
+      const gif = readFileSync(outputPath);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.log(`[gifhero-cli] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${fps}fps, ${width}px, ${preset})`);
+
+      res.writeHead(200, {
+        "Content-Type": "image/gif",
+        "Content-Length": String(gif.length),
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(gif);
+    } catch (err) {
+      console.error("[gifhero-cli] Error:", (err as Error).message);
+      res.writeHead(500);
+      res.end((err as Error).message);
+    } finally {
+      try { execSync(`rm -rf "${tmpDir}"`); } catch {}
+    }
+    return;
+  }
+
   // ── Static file server ──
   const file = serveFile(req.url ?? "/");
   if (file) {
-    res.writeHead(200, { "Content-Type": file.mime, "Access-Control-Allow-Origin": "*" });
+    res.writeHead(200, {
+      "Content-Type": file.mime,
+      "Access-Control-Allow-Origin": "*",
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    });
     res.end(file.data);
   } else {
     res.writeHead(404);

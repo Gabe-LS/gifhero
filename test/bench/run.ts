@@ -164,6 +164,30 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
       }));
     },
   };
+
+  const rustBin = join(__dirname, "../../packages/gifhero-core/target/release/examples/encode_test");
+
+  encoders[`rust-balanced${suffix}`] = {
+    available: () => existsSync(rustBin),
+    encode: (framesDir, outputPath) => {
+      const twArg = targetWidth ? ` ${targetWidth}` : "";
+      execSync(
+        `"${rustBin}" "${framesDir}" "${outputPath}"${twArg}`,
+        { stdio: "ignore", timeout: 120000 },
+      );
+    },
+  };
+
+  encoders[`rust-quality${suffix}`] = {
+    available: () => existsSync(rustBin),
+    encode: (framesDir, outputPath) => {
+      const twArg = targetWidth ? ` ${targetWidth}` : "";
+      execSync(
+        `"${rustBin}" "${framesDir}" "${outputPath}"${twArg} --quality`,
+        { stdio: "ignore", timeout: 120000 },
+      );
+    },
+  };
 }
 
 function loadPngFrames(dir: string): {
@@ -1053,7 +1077,8 @@ async function main() {
 
   // Cleanup temp dir (extracted frames, logs) but references are kept
   try {
-    rmSync(TEMP_DIR, { recursive: true, force: true });
+    // Keep GIFs for visual inspection
+    // rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}
 
   console.log("");

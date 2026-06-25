@@ -19,6 +19,13 @@ export class QuantResult {
  */
 export function build_shared_palette(frames_rgba: Uint8Array, width: number, height: number, frame_count: number, quality_min: number, quality_max: number, speed: number, max_colors: number): Uint8Array;
 
+/**
+ * Lanczos3 downscale of an RGBA image. Two-pass separable filter
+ * with precomputed kernel weights and correct non-premultiplied
+ * alpha handling.
+ */
+export function downsample_lanczos3(src: Uint8Array, src_w: number, src_h: number, dst_w: number, dst_h: number): Uint8Array;
+
 export function quantize_no_dither(rgba: Uint8Array, width: number, height: number, quality_min: number, quality_max: number, speed: number, max_colors: number, background_rgba: Uint8Array, importance_map: Uint8Array): QuantResult;
 
 export function quantize_simple(rgba: Uint8Array, width: number, height: number, quality_min: number, quality_max: number, speed: number, max_colors: number): QuantResult;

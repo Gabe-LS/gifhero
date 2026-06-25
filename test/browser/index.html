@@ -180,23 +180,70 @@
         const gifskiEncodeTime = (gifskiResult.encodeTime / 1000).toFixed(1);
         console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (encode only: ${gifskiEncodeTime}s)`);
 
+        // ── gifhero CLI (native Rayon) ──
+        progress.textContent = "gifhero CLI (native Rayon): encoding on server...";
+        let gifheroCliFormData = new FormData();
+        gifheroCliFormData.append("video", file);
+        gifheroCliFormData.append("fps", String(fps));
+        gifheroCliFormData.append("width", String(MAX_DIMENSION));
+        gifheroCliFormData.append("preset", preset);
+
+        const t3 = performance.now();
+        let gifheroCliGif = null;
+        let gifheroCliTime = 0;
+        try {
+          const resp = await fetch("/api/gifhero", { method: "POST", body: gifheroCliFormData });
+          if (!resp.ok) throw new Error(await resp.text());
+          const buf = await resp.arrayBuffer();
+          gifheroCliGif = new Uint8Array(buf);
+          gifheroCliTime = (performance.now() - t3) / 1000;
+          console.log(`[benchmark] gifhero CLI: ${(gifheroCliGif.byteLength/1024).toFixed(0)} KB in ${gifheroCliTime.toFixed(1)}s (native Rayon)`);
+        } catch (err) {
+          console.warn(`[benchmark] gifhero CLI failed: ${err.message}`);
+        }
+
+        // ── gifski CLI (native multi-threaded) ──
+        progress.textContent = "gifski CLI (native multi-threaded): encoding on server...";
+        const gifskiFormData = new FormData();
+        gifskiFormData.append("video", file);
+        gifskiFormData.append("fps", String(fps));
+        gifskiFormData.append("width", String(MAX_DIMENSION));
+
+        const t4 = performance.now();
+        let gifskiCliGif = null;
+        let gifskiCliTime = 0;
+        try {
+          const resp = await fetch("/api/gifski", { method: "POST", body: gifskiFormData });
+          if (!resp.ok) throw new Error(await resp.text());
+          const buf = await resp.arrayBuffer();
+          gifskiCliGif = new Uint8Array(buf);
+          gifskiCliTime = (performance.now() - t4) / 1000;
+          console.log(`[benchmark] gifski CLI: ${(gifskiCliGif.byteLength/1024).toFixed(0)} KB in ${gifskiCliTime.toFixed(1)}s (native MT)`);
+        } catch (err) {
+          console.warn(`[benchmark] gifski CLI failed: ${err.message}`);
+        }
+
         // ── Summary ──
         console.log(`[benchmark] SUMMARY @ ${fps}fps, ${MAX_DIMENSION}px:`);
-        console.log(`[benchmark]   gifhero:     ${(gifheroGif.byteLength/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
-        console.log(`[benchmark]   gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
-        console.log(`[benchmark]   size: gifhero is ${((1 - gifheroGif.byteLength / gifskiGif.byteLength) * 100).toFixed(0)}% smaller`);
-        console.log(`[benchmark]   speed: gifhero is ${(gifskiTime / gifheroTime).toFixed(1)}× faster`);
+        console.log(`[benchmark]   gifhero browser:     ${(gifheroGif.byteLength/1024).toFixed(0)} KB in ${gifheroTime.toFixed(1)}s`);
+        if (gifheroCliGif) console.log(`[benchmark]   gifhero CLI (Rayon):  ${(gifheroCliGif.byteLength/1024).toFixed(0)} KB in ${gifheroCliTime.toFixed(1)}s`);
+        console.log(`[benchmark]   gifski wasm:         ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s`);
+        if (gifskiCliGif) console.log(`[benchmark]   gifski CLI (native):  ${(gifskiCliGif.byteLength/1024).toFixed(0)} KB in ${gifskiCliTime.toFixed(1)}s`);
         console.log("━━━ BENCHMARK END ━━━");
 
         progress.textContent = "";
-        const heroSmaller = gifheroGif.byteLength <= gifskiGif.byteLength;
-        results.innerHTML =
+        const entries = [
+          { label: "gifhero browser", gif: gifheroGif, time: gifheroTime },
+        ];
+        if (gifheroCliGif) entries.push({ label: "gifhero CLI", gif: gifheroCliGif, time: gifheroCliTime });
+        entries.push({ label: "gifski wasm", gif: gifskiGif, time: gifskiTime });
+        if (gifskiCliGif) entries.push({ label: "gifski CLI", gif: gifskiCliGif, time: gifskiCliTime });
+        const smallest = Math.min(...entries.map(e => e.gif.byteLength));
+        results.innerHTML = entries.map(e =>
           showCompare("benchResults",
-            `gifhero — ${(gifheroGif.byteLength/1024).toFixed(0)} KB · ${gifheroTime.toFixed(1)}s`,
-            gifheroGif, gifheroTime, heroSmaller) +
-          showCompare("benchResults",
-            `gifski-wasm — ${(gifskiGif.byteLength/1024).toFixed(0)} KB · ${gifskiTime.toFixed(1)}s`,
-            gifskiGif, gifskiTime, !heroSmaller);
+            `${e.label} — ${(e.gif.byteLength/1024).toFixed(0)} KB · ${e.time.toFixed(1)}s`,
+            e.gif, e.time, e.gif.byteLength <= smallest)
+        ).join("");
 
       } catch (err) {
         progress.textContent = `Error: ${err.message}`;

@@ -188,3 +188,28 @@ export function remapWithPalette(
   result.free();
   return out;
 }
+
+/**
+ * Lanczos3 downscale via WASM — same algorithm as resize.ts but ~7x faster.
+ *
+ * @param src - Source RGBA pixel data
+ * @param srcW - Source width
+ * @param srcH - Source height
+ * @param dstW - Destination width
+ * @param dstH - Destination height
+ * @returns Downscaled RGBA pixel data
+ */
+export function downsampleWasm(
+  src: Uint8ClampedArray,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+): Uint8ClampedArray {
+  const m = getMod();
+  const result = m.downsample_lanczos3(
+    new Uint8Array(src.buffer, src.byteOffset, src.byteLength),
+    srcW, srcH, dstW, dstH,
+  );
+  return new Uint8ClampedArray(result.buffer, result.byteOffset, result.byteLength);
+}

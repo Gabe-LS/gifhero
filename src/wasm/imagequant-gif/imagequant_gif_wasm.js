@@ -105,6 +105,34 @@ function build_shared_palette(frames_rgba, width, height, frame_count, quality_m
 exports.build_shared_palette = build_shared_palette;
 
 /**
+ * Lanczos3 downscale of an RGBA image. Two-pass separable filter
+ * with precomputed kernel weights and correct non-premultiplied
+ * alpha handling.
+ * @param {Uint8Array} src
+ * @param {number} src_w
+ * @param {number} src_h
+ * @param {number} dst_w
+ * @param {number} dst_h
+ * @returns {Uint8Array}
+ */
+function downsample_lanczos3(src, src_w, src_h, dst_w, dst_h) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(src, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.downsample_lanczos3(retptr, ptr0, len0, src_w, src_h, dst_w, dst_h);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+exports.downsample_lanczos3 = downsample_lanczos3;
+
+/**
  * @param {Uint8Array} rgba
  * @param {number} width
  * @param {number} height
@@ -326,35 +354,8 @@ function decodeText(ptr, len) {
 
 let WASM_VECTOR_LEN = 0;
 
-// Universal WASM loading: base64-embedded, works in Node.js + browsers + workers
-let wasm;
-
-function _initWasm(bytes) {
-    const wasmModule = new WebAssembly.Module(bytes);
-    const wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
-    wasm = wasmInstance.exports;
-}
-
-function _ensureWasm() {
-    if (wasm) return;
-    // Try Node.js fs first (faster, avoids base64 decode)
-    try {
-        const fs = typeof require === 'function' && require('fs');
-        const path = typeof require === 'function' && require('path');
-        if (fs && path && typeof __dirname !== 'undefined') {
-            const wasmPath = path.join(__dirname, 'imagequant_gif_wasm_bg.wasm');
-            _initWasm(fs.readFileSync(wasmPath));
-            return;
-        }
-    } catch (_) { /* not Node.js */ }
-    // Fallback: decode base64-embedded WASM
-    const { wasmBase64 } = require('./imagequant_gif_wasm_bg.b64.js');
-    const binaryString = typeof atob === 'function'
-        ? atob(wasmBase64)
-        : Buffer.from(wasmBase64, 'base64').toString('binary');
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-    _initWasm(bytes);
-}
-
-_ensureWasm();
+const wasmPath = `${__dirname}/imagequant_gif_wasm_bg.wasm`;
+const wasmBytes = require('fs').readFileSync(wasmPath);
+const wasmModule = new WebAssembly.Module(wasmBytes);
+let wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
+let wasm = wasmInstance.exports;

@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use crate::{encode, EncodeFrame, EncodeOptions, Preset};
+use crate::{encode_slices, EncodeOptions, Preset};
 
 #[wasm_bindgen]
 pub fn encode_gif(
@@ -16,15 +16,14 @@ pub fn encode_gif(
     let fc = frame_count as usize;
     let frame_size = w * h * 4;
 
-    let frames: Vec<EncodeFrame> = (0..fc)
+    let slices: Vec<&[u8]> = (0..fc)
         .map(|i| {
             let start = i * frame_size;
-            EncodeFrame {
-                data: frames_rgba[start..start + frame_size].to_vec(),
-                delay: delay_ms as u16,
-            }
+            &frames_rgba[start..start + frame_size]
         })
         .collect();
+
+    let delays: Vec<u16> = vec![delay_ms as u16; fc];
 
     let opts = EncodeOptions {
         width: w,
@@ -37,5 +36,5 @@ pub fn encode_gif(
         stale_threshold: None,
     };
 
-    encode(&frames, &opts)
+    encode_slices(&slices, &delays, &opts)
 }

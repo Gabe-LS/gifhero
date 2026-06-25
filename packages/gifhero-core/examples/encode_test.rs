@@ -54,20 +54,21 @@ fn load_frames(dir: &str, max_frames: usize) -> (Vec<Vec<u8>>, usize, usize) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: encode_test <frames_dir> <output.gif> [target_width] [--single]");
+        eprintln!("Usage: encode_test <frames_dir> <output.gif> [target_width] [--single] [--quality]");
         std::process::exit(1);
     }
 
     let frames_dir = &args[1];
     let output_path = &args[2];
     let single_threaded = args.iter().any(|a| a == "--single");
+    let is_quality = args.iter().any(|a| a == "--quality");
 
     let target_width: Option<usize> = args.iter()
-        .filter(|a| *a != "--single")
+        .filter(|a| !a.starts_with("--"))
         .nth(3)
         .and_then(|s| s.parse().ok());
 
-    let (raw_frames, width, height) = load_frames(frames_dir, 100);
+    let (raw_frames, width, height) = load_frames(frames_dir, 10000);
     eprintln!("Loaded {} frames ({}x{})", raw_frames.len(), width, height);
 
     let frames: Vec<EncodeFrame> = raw_frames.into_iter().map(|data| EncodeFrame {
@@ -78,7 +79,7 @@ fn main() {
     let opts = EncodeOptions {
         width,
         height,
-        preset: Preset::Balanced,
+        preset: if is_quality { Preset::Quality } else { Preset::Balanced },
         target_width,
         target_height: None,
         lossy_lzw: None,

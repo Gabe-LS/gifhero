@@ -3,16 +3,18 @@ use gifhero_core::{encode_parallel, EncodeFrame, EncodeOptions, Preset};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::Instant;
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "gifhero", version, about = "High-quality GIF encoder")]
 struct Cli {
-    /// Input video file (any format ffmpeg supports)
-    input: String,
+    /// Input video files (any format ffmpeg supports)
+    #[arg(required = true)]
+    inputs: Vec<String>,
 
-    /// Output GIF path
-    #[arg(short, long, default_value = "output.gif")]
-    output: String,
+    /// Output path (file for single input, directory for multiple)
+    #[arg(short, long)]
+    output: Option<String>,
 
     /// Target width in pixels (height auto from aspect ratio)
     #[arg(short, long)]
@@ -34,7 +36,7 @@ struct Cli {
     #[arg(long)]
     max_duration: Option<f64>,
 
-    /// Number of worker threads (default: all cores)
+    /// Number of worker threads per file (default: auto)
     #[arg(short = 'j', long)]
     threads: Option<usize>,
 
@@ -147,13 +149,85 @@ fn extract_frames(
     frames
 }
 
+fn output_path_for(input: &str, out_dir: Option<&str>) -> String {
+    let stem = Path::new(input)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    match out_dir {
+        Some(dir) => {
+            let dir = dir.trim_end_matches('/');
+            format!("{}/{}.gif", dir, stem)
+        }
+        None => format!("{}.gif", stem),
+    }
+}
+
+fn encode_one(
+    input: &str,
+    output: &str,
+    preset: Preset,
+    width: Option<usize>,
+    height: Option<usize>,
+    fps: u32,
+    max_duration: Option<f64>,
+    quiet: bool,
+) {
+    if !Path::new(input).exists() {
+        eprintln!("Error: input file '{}' not found", input);
+        return;
+    }
+
+    if !quiet {
+        eprintln!("[{}] Extracting frames...", input);
+    }
+
+    let (src_w, src_h) = probe_dimensions(input);
+    let raw_frames = extract_frames(input, fps, max_duration, src_w, src_h);
+
+    if !quiet {
+        eprintln!("[{}] {} frames ({}x{})", input, raw_frames.len(), src_w, src_h);
+    }
+
+    let delay_ms = (1000.0 / fps as f64).round() as u16;
+    let frames: Vec<EncodeFrame> = raw_frames.into_iter()
+        .map(|data| EncodeFrame { data, delay: delay_ms })
+        .collect();
+
+    let opts = EncodeOptions {
+        width: src_w,
+        height: src_h,
+        preset,
+        target_width: width,
+        target_height: height,
+        lossy_lzw: None,
+        max_colors: None,
+        stale_threshold: None,
+    };
+
+    let start = Instant::now();
+    let gif = encode_parallel(&frames, &opts);
+    let elapsed = start.elapsed();
+
+    std::fs::write(output, &gif).unwrap_or_else(|e| {
+        eprintln!("Error: failed to write '{}': {e}", output);
+    });
+
+    if !quiet {
+        eprintln!(
+            "[{}] {} KB in {:.1}s ({} frames, {}fps → {})",
+            input,
+            gif.len() / 1024,
+            elapsed.as_secs_f64(),
+            frames.len(),
+            fps,
+            output,
+        );
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-
-    if !std::path::Path::new(&cli.input).exists() {
-        eprintln!("Error: input file '{}' not found", cli.input);
-        std::process::exit(1);
-    }
 
     let preset = match cli.preset.as_str() {
         "quality" => Preset::Quality,
@@ -164,63 +238,88 @@ fn main() {
         }
     };
 
-    if let Some(threads) = cli.threads {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build_global()
-            .ok();
-    }
+    let single = cli.inputs.len() == 1;
 
-    if !cli.quiet {
-        eprintln!("Extracting frames from {}...", cli.input);
-    }
+    if single {
+        // Single file: use all threads, output to -o or input.gif
+        if let Some(threads) = cli.threads {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build_global()
+                .ok();
+        }
 
-    let (src_w, src_h) = probe_dimensions(&cli.input);
-    let raw_frames = extract_frames(&cli.input, cli.fps, cli.max_duration, src_w, src_h);
+        let output = cli.output.clone()
+            .unwrap_or_else(|| output_path_for(&cli.inputs[0], None));
 
-    if !cli.quiet {
-        eprintln!("Extracted {} frames ({}x{})", raw_frames.len(), src_w, src_h);
-    }
-
-    let delay_ms = (1000.0 / cli.fps as f64).round() as u16;
-    let frames: Vec<EncodeFrame> = raw_frames.into_iter()
-        .map(|data| EncodeFrame { data, delay: delay_ms })
-        .collect();
-
-    let opts = EncodeOptions {
-        width: src_w,
-        height: src_h,
-        preset,
-        target_width: cli.width,
-        target_height: cli.height,
-        lossy_lzw: None,
-        max_colors: None,
-        stale_threshold: None,
-    };
-
-    if !cli.quiet {
-        let tw = cli.width.map(|w| format!(" → {}p", w)).unwrap_or_default();
-        eprintln!("Encoding {} frames ({}x{}{}, {})...",
-            frames.len(), src_w, src_h, tw, cli.preset);
-    }
-
-    let start = Instant::now();
-    let gif = encode_parallel(&frames, &opts);
-    let elapsed = start.elapsed();
-
-    std::fs::write(&cli.output, &gif).unwrap_or_else(|e| {
-        eprintln!("Error: failed to write '{}': {e}", cli.output);
-        std::process::exit(1);
-    });
-
-    if !cli.quiet {
-        eprintln!(
-            "Done: {} KB in {:.1}s ({} frames, {}fps → {})",
-            gif.len() / 1024,
-            elapsed.as_secs_f64(),
-            frames.len(),
-            cli.fps,
-            cli.output,
+        encode_one(
+            &cli.inputs[0], &output, preset,
+            cli.width, cli.height, cli.fps, cli.max_duration, cli.quiet,
         );
+    } else {
+        // Multiple files: parallel file processing with thread pool per file
+        let num_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let num_files = cli.inputs.len();
+
+        // Sweet spot: 4 concurrent files with 4 threads each (from benchmarks)
+        let concurrency = cli.threads.unwrap_or_else(|| {
+            (num_cores / 4).clamp(1, num_files)
+        });
+        let threads_per_file = (num_cores / concurrency).max(1);
+
+        // Create output directory if -o specified
+        let out_dir = cli.output.as_deref();
+        if let Some(dir) = out_dir {
+            std::fs::create_dir_all(dir).unwrap_or_else(|e| {
+                eprintln!("Error: cannot create output directory '{}': {e}", dir);
+                std::process::exit(1);
+            });
+        }
+
+        if !cli.quiet {
+            eprintln!(
+                "Encoding {} files ({} concurrent, {} threads each)",
+                num_files, concurrency, threads_per_file,
+            );
+        }
+
+        let total_start = Instant::now();
+
+        // Process files in batches of `concurrency`
+        let inputs = &cli.inputs;
+        for batch_start in (0..inputs.len()).step_by(concurrency) {
+            let batch_end = (batch_start + concurrency).min(inputs.len());
+            let batch = &inputs[batch_start..batch_end];
+
+            std::thread::scope(|s| {
+                for input in batch {
+                    let output = output_path_for(input, out_dir);
+                    s.spawn(move || {
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(threads_per_file)
+                            .build()
+                            .unwrap();
+                        pool.install(|| {
+                            encode_one(
+                                input, &output, preset,
+                                cli.width, cli.height, cli.fps, cli.max_duration, cli.quiet,
+                            );
+                        });
+                    });
+                }
+            });
+        }
+
+        if !cli.quiet {
+            let total = total_start.elapsed();
+            eprintln!(
+                "All done: {} files in {:.1}s ({:.1} files/s)",
+                num_files,
+                total.as_secs_f64(),
+                num_files as f64 / total.as_secs_f64(),
+            );
+        }
     }
 }

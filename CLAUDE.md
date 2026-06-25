@@ -1,18 +1,45 @@
 # gifhero
 
 ## What This Is
-A TypeScript GIF encoding library targeting the browser (Chrome extensions, web apps).
-Zero cases >5% larger than gifski across 200 encodes (25 fixtures × 4 resolutions). Wins VMAF at every resolution.
+A GIF encoding library with a TypeScript browser SDK and a native Rust CLI.
+Produces 4-15% smaller files than gifski at equal or better VMAF across 25 fixtures × 4 resolutions.
 
 ## Tech Stack
-- TypeScript (strict mode), targeting ES2020
-- Build: tsup (ESM + CJS dual output)
-- Test: vitest
+- **Browser SDK**: TypeScript (strict mode), ES2020, tsup (ESM + CJS)
+- **Native CLI**: Rust, Rayon multi-threading, imagequant with internal threading
 - Custom libimagequant WASM with `set_background` / `set_importance_map` for native GIF transparency
 - WASM embedded as base64 — works in Node.js, browsers, workers, Chrome extensions (no fs/fetch needed)
-- Lanczos3 downscaling (pure JS, no DOM)
+- WASM Lanczos3 downscaling (12× faster than pure JS)
 - Zero Node-only APIs in the ESM bundle — no runtime dependencies
-- Bundle: 246KB ESM / 254KB CJS (self-contained, WASM included)
+- Browser bundle: ~985KB ESM (self-contained, WASM included)
+- CLI binary: 960KB (statically linked)
+
+## Native CLI (`packages/gifhero-core`)
+
+Rust crate with the full encoding pipeline. Compiles to native binary and WASM.
+
+### Usage
+```bash
+# Single file
+gifhero input.mp4 -w 480 --fps 20 -o output.gif
+
+# Multiple files (parallel encoding)
+gifhero video1.mp4 video2.mp4 video3.mp4 -w 480 -o outdir/
+
+# Quality preset
+gifhero input.mp4 -w 480 --preset quality -o output.gif
+```
+
+### Building
+```bash
+cd packages/gifhero-core
+cargo build --release --features cli
+```
+
+### Performance
+- Single file (100 frames, 480p): ~0.9s
+- Batch throughput: 3.4 files/s at 4-wide concurrency (5.2× vs sequential)
+- vs gifski CLI: 2.5× slower per file, but 7-14% smaller output
 
 ## Conventions
 - Pure functions where possible. No classes unless managing stateful resources (workers, WASM instances).
@@ -36,9 +63,17 @@ Scans all source frames to build a content profile before any encoding:
 
 Probe runs in < 100ms for 60 frames at 480×270 (pure RGB arithmetic, no quantization).
 
+### Downscaling (`src/resize.ts` + WASM)
+
+Lanczos3 (sinc-windowed sinc) resampling with two implementations:
+- **WASM** (default): `downsample_lanczos3()` in the Rust crate. Precomputed kernel weights, f32 accumulators. ~18ms/frame for 1080p→480p (12× faster than JS).
+- **Pure JS** fallback: `downsample()` in `src/resize.ts`. ~228ms/frame. Exported for consumers who don't load the WASM module.
+
+Both are two-pass separable filters with correct non-premultiplied alpha handling. Outputs are bit-identical.
+
 ### Pass 2: Encode
 
-Optional Lanczos3 downscaling via `targetWidth`, then two quantizer paths selected automatically:
+WASM Lanczos3 downscaling via `targetWidth`, then two quantizer paths selected automatically:
 
 #### Background-aware path (default when WASM available)
 
@@ -95,10 +130,6 @@ Source frames
   → GIF89a writer
 ```
 
-### Downscaling (`src/resize.ts`)
-
-Lanczos3 (sinc-windowed sinc) resampling — the same algorithm used by libswscale, Photoshop, and ImageMagick. Two-pass separable filter with correct alpha handling. Pure RGBA arithmetic, no DOM or canvas dependency. Works in browser and workers.
-
 ### Custom WASM module (`packages/imagequant-gif-wasm`)
 
 Rust crate wrapping libimagequant v4 with wasm-bindgen. Exposes:
@@ -109,8 +140,9 @@ Rust crate wrapping libimagequant v4 with wasm-bindgen. Exposes:
 - `set_importance_map()` — de-prioritizes static pixels in palette allocation.
 - `build_shared_palette()` — pools sampled frames via Histogram for multi-frame shared palette.
 - `remap_with_palette()` — remaps frame with pre-built palette + background awareness.
+- `downsample_lanczos3()` — Lanczos3 downscale with precomputed kernel weights. 12× faster than pure JS (18ms vs 228ms for 1080p→480p). Bit-identical output.
 
-Built with `wasm-pack --target nodejs --no-opt` (125KB WASM binary). The binary is embedded as base64 in `imagequant-gif-wasm.ts` for universal loading. The ESM glue replaces the wasm-pack CJS output to avoid Node-only APIs (`fs`, `createRequire`, `__dirname`).
+Built with `wasm-pack --target nodejs --no-opt` (135KB WASM binary). The binary is embedded as base64 in `imagequant-gif-wasm.ts` for universal loading. The ESM glue replaces the wasm-pack CJS output to avoid Node-only APIs (`fs`, `createRequire`, `__dirname`).
 
 ### File structure
 
@@ -118,7 +150,7 @@ Built with `wasm-pack --target nodejs --no-opt` (125KB WASM binary). The binary 
 src/
 ├── index.ts                    Main encode() API, presets, two-pass pipeline
 ├── probe.ts                    Pre-encode frame analysis (static mask, motion, keyframes)
-├── resize.ts                   Lanczos3 downscaling (pure JS)
+├── resize.ts                   Lanczos3 downscaling (pure JS fallback)
 ├── quantizers/
 │   ├── neuquant.ts             NeuQuant neural network quantizer (256 colors)
 │   ├── imagequant.ts           libimagequant WASM wrapper (npm package, fallback)
@@ -143,9 +175,25 @@ src/
 └── types/                      TypeScript declarations for WASM modules
 
 packages/
-└── imagequant-gif-wasm/        Rust crate for custom libimagequant WASM
+├── imagequant-gif-wasm/        Rust crate for custom libimagequant WASM
+│   ├── Cargo.toml
+│   └── src/lib.rs
+└── gifhero-core/               Rust crate — full encoding pipeline + CLI
     ├── Cargo.toml
-    └── src/lib.rs
+    ├── src/
+    │   ├── lib.rs              encode() + encode_parallel() orchestrators
+    │   ├── probe.rs            Static mask, motion, color complexity, keyframes
+    │   ├── denoise.rs          3-frame temporal median
+    │   ├── quantize.rs         imagequant wrapper
+    │   ├── subframe.rs         Bbox, crop, canvas, trim palette (power-of-2)
+    │   ├── lanczos3.rs         Lanczos3 downscale (precomputed kernels)
+    │   ├── lzw.rs              Standard + lossy LZW (deferred clear)
+    │   ├── gif.rs              GIF89a binary writer
+    │   ├── dither.rs           Floyd-Steinberg (fallback path)
+    │   ├── wasm.rs             wasm-bindgen exports
+    │   └── main.rs             CLI (clap + ffmpeg pipe + multi-file)
+    └── examples/
+        └── encode_test.rs      Benchmark utility
 
 test/bench/
 ├── run.ts                      Benchmark runner (25 fixtures × 4 resolutions × 3 encoders)
@@ -251,17 +299,33 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 **Zero VMAF losses >2 points on either preset.**
 
 ## Current Phase
-Phase 9 complete. Two presets with reduced posterization:
-- **quality** (q98): maximum VMAF, 61 palette entries for grayscale content (was 26 at q90), lower staleThreshold, no denoiser
-- **balanced** (q95): maximum compression, 38 palette entries (was 26), higher staleThreshold, noise-aware temporal denoiser
+Rust port complete. Two delivery targets from one pipeline:
 
-Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, Lanczos3 downscaling, motion-adjusted staleThreshold.
+### Native CLI (`packages/gifhero-core`)
+- Full pipeline in Rust: probe → quantize → subframe → LZW → GIF
+- Rayon parallel: Lanczos3 + LZW across cores, imagequant internal threading
+- Multi-file batch encoding: `gifhero *.mp4 -w 480 -o outdir/`
+- Sweet spot: 4 concurrent files × 4 threads each → 3.4 files/s (5.2× vs sequential)
+- Per-file: ~0.9s for 100 frames at 480p
 
 ### Browser SDK
 - `gifhero/browser` entry point with fluent API: `gifhero.fromFile(file).fps(20).width(480).toGif()`
-- VideoDecoder + Mediabunny demuxer for fast video-to-GIF (10-50× faster than seek-based extraction)
+- VideoDecoder + Mediabunny demuxer for fast video-to-GIF
+- Hybrid TS+WASM pipeline (JS orchestrator + per-frame WASM quantize + WASM Lanczos3)
 - Web Worker encoding, ImageBitmap frame storage, progress callbacks, cancellation
-- In-browser benchmark tool comparing gifhero vs gifski-wasm side by side
+- In-browser benchmark comparing gifhero vs gifski-wasm vs gifski CLI
+
+### Presets
+- **quality** (q98): maximum VMAF, lower staleThreshold, no denoiser
+- **balanced** (q95): maximum compression, higher staleThreshold, noise-aware temporal denoiser
+
+Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, WASM Lanczos3 downscaling, motion-adjusted staleThreshold.
+
+### Rust ↔ TypeScript pipeline parity
+Validated across 25 fixtures × 4 resolutions × 2 presets = 200 comparisons:
+- 118/200 byte-identical output
+- 82/200 within ±5% (imagequant threading RNG)
+- Max VMAF difference: 0.2 points
 
 ## Known Limitations
 - **Gradient banding on 256-color content**: smooth gradients across thousands of colors will always show some banding in GIF. Tested noise/grain injection, q100, and dithering variations — all trade 2-5x file size for marginal visual improvement. This is a GIF format ceiling (256 colors per frame), not an encoder limitation. gifski has the same issue.
