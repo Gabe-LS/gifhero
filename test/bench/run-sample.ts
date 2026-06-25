@@ -121,7 +121,7 @@ const ALL_ENCODERS: Record<string, { available: () => boolean; encode: EncoderFn
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath, targetWidth) => {
       const wFlag = targetWidth ? `--width ${targetWidth} ` : "";
-      execSync(`gifski --fps 20 --quality 80 --lossy-quality 60 ${wFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+      execSync(`gifski --fps 20 --quality 80 --lossy-quality 80 ${wFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" });
     },
   },
@@ -327,8 +327,10 @@ function computeVmafMetrics(framesDir: string, gifPath: string, w: number, h: nu
   try {
     const cmd =
       `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -i "${gifPath}" ` +
-      `-filter_complex "[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
-      `[0:v]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
+      `-filter_complex "` +
+      `[0:v]scale=${w}:${h}:flags=bicubic[ref];` +
+      `[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
+      `[ref]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
       `[r1][d1]libvmaf=log_path=${logVmaf}:log_fmt=json:feature=name=ciede;` +
       `[r2][d2]ssim;[r3][d3]psnr" -f null - 2>&1`;
     const out = execSync(cmd, { encoding: "utf-8", timeout: 300000 });

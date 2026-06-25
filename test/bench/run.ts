@@ -173,7 +173,7 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     encode: (framesDir, outputPath) => {
       const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `gifski --fps 20 --quality 80 --lossy-quality 60 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 --quality 80 --lossy-quality 80 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
