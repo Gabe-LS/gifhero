@@ -174,14 +174,39 @@ interface GifInspection {
   logicalWidth: number;
   logicalHeight: number;
   hasGlobalColorTable: boolean;
+  globalColorTableSize: number;
+  // Palette
+  minPaletteSize: number;
+  maxPaletteSize: number;
   avgPaletteSize: number;
+  // Compression
   avgFrameCompressedBytes: number;
+  minFrameCompressedBytes: number;
+  maxFrameCompressedBytes: number;
   totalCompressedBytes: number;
-  fullFrameCount: number;      // frames that cover the entire canvas
-  subFrameCount: number;       // frames smaller than canvas (bbox optimized)
-  avgSubFrameCoverage: number; // avg fraction of canvas covered by sub-frames
+  // Sub-framing
+  fullFrameCount: number;
+  subFrameCount: number;
+  avgSubFrameCoverage: number;
+  minSubFrameCoverage: number;
+  // Transparency
   transparentFrameCount: number;
+  // Timing
+  delays: number[];           // all unique delay values in seconds
+  avgDelay: number;
+  minDelay: number;
+  maxDelay: number;
+  constantDelay: boolean;     // true if all frames have the same delay
+  // Disposal
   disposalMethods: Record<string, number>;
+  // Metadata
+  loopCount: string;          // "forever", "none", or number
+  comments: string[];
+  interlaced: boolean;
+  // Derived
+  durationSeconds: number;
+  effectiveFps: number;
+  bitsPerPixel: number;       // totalCompressedBytes * 8 / (frameCount * w * h)
 }
 
 function inspectGif(gifPath: string, canvasW: number, canvasH: number): GifInspection | null {
@@ -191,10 +216,14 @@ function inspectGif(gifPath: string, canvasW: number, canvasH: number): GifInspe
     const lines = out.split("\n");
 
     let logicalWidth = 0, logicalHeight = 0;
-    let hasGCT = false;
+    let hasGCT = false, gctSize = 0;
+    let loopCount = "none";
+    let interlaced = false;
+    const comments: string[] = [];
     const paletteSizes: number[] = [];
     const compressedSizes: number[] = [];
     const frameDims: Array<{ w: number; h: number }> = [];
+    const frameDelays: number[] = [];
     let transparentCount = 0;
     const disposals: Record<string, number> = {};
 
@@ -202,7 +231,12 @@ function inspectGif(gifPath: string, canvasW: number, canvasH: number): GifInspe
       const lsMatch = line.match(/logical screen (\d+)x(\d+)/);
       if (lsMatch) { logicalWidth = +lsMatch[1]; logicalHeight = +lsMatch[2]; }
 
-      if (line.includes("global color table")) hasGCT = true;
+      const gctMatch = line.match(/global color table \[(\d+)\]/);
+      if (gctMatch) { hasGCT = true; gctSize = +gctMatch[1]; }
+
+      if (line.includes("loop forever")) loopCount = "forever";
+      const loopMatch = line.match(/loop count (\d+)/);
+      if (loopMatch) loopCount = loopMatch[1];
 
       const imgMatch = line.match(/image #\d+ (\d+)x(\d+)/);
       if (imgMatch) frameDims.push({ w: +imgMatch[1], h: +imgMatch[2] });
@@ -214,34 +248,65 @@ function inspectGif(gifPath: string, canvasW: number, canvasH: number): GifInspe
       if (lctMatch) paletteSizes.push(+lctMatch[1]);
 
       if (line.includes("transparent")) transparentCount++;
+      if (line.includes("interlaced")) interlaced = true;
+
+      const delayMatch = line.match(/delay ([\d.]+)s/);
+      if (delayMatch) frameDelays.push(parseFloat(delayMatch[1]));
 
       const dispMatch = line.match(/disposal (\w+)/);
       if (dispMatch) {
         const d = dispMatch[1];
         disposals[d] = (disposals[d] || 0) + 1;
       }
+
+      const commentMatch = line.match(/comment (.+)/);
+      if (commentMatch) comments.push(commentMatch[1].trim());
     }
 
-    const canvasPixels = (logicalWidth || canvasW) * (logicalHeight || canvasH);
+    const w = logicalWidth || canvasW;
+    const h = logicalHeight || canvasH;
+    const canvasPixels = w * h;
     const fullFrames = frameDims.filter(d => d.w * d.h >= canvasPixels * 0.95).length;
     const subFrames = frameDims.filter(d => d.w * d.h < canvasPixels * 0.95);
-    const avgCoverage = subFrames.length > 0
-      ? subFrames.reduce((s, d) => s + (d.w * d.h) / canvasPixels, 0) / subFrames.length
-      : 0;
+    const subCoverages = subFrames.map(d => (d.w * d.h) / canvasPixels);
+    const avgCoverage = subCoverages.length > 0
+      ? subCoverages.reduce((s, c) => s + c, 0) / subCoverages.length : 0;
+    const minCoverage = subCoverages.length > 0 ? Math.min(...subCoverages) : 0;
+
+    const totalCompressed = compressedSizes.reduce((a, b) => a + b, 0);
+    const totalDuration = frameDelays.reduce((a, b) => a + b, 0);
+    const uniqueDelays = [...new Set(frameDelays)];
 
     return {
       frameCount: frameDims.length,
-      logicalWidth: logicalWidth || canvasW,
-      logicalHeight: logicalHeight || canvasH,
+      logicalWidth: w,
+      logicalHeight: h,
       hasGlobalColorTable: hasGCT,
+      globalColorTableSize: gctSize,
+      minPaletteSize: paletteSizes.length > 0 ? Math.min(...paletteSizes) : 0,
+      maxPaletteSize: paletteSizes.length > 0 ? Math.max(...paletteSizes) : 0,
       avgPaletteSize: paletteSizes.length > 0 ? Math.round(paletteSizes.reduce((a, b) => a + b, 0) / paletteSizes.length) : 0,
       avgFrameCompressedBytes: compressedSizes.length > 0 ? Math.round(compressedSizes.reduce((a, b) => a + b, 0) / compressedSizes.length) : 0,
-      totalCompressedBytes: compressedSizes.reduce((a, b) => a + b, 0),
+      minFrameCompressedBytes: compressedSizes.length > 0 ? Math.min(...compressedSizes) : 0,
+      maxFrameCompressedBytes: compressedSizes.length > 0 ? Math.max(...compressedSizes) : 0,
+      totalCompressedBytes: totalCompressed,
       fullFrameCount: fullFrames,
       subFrameCount: subFrames.length,
       avgSubFrameCoverage: Math.round(avgCoverage * 1000) / 1000,
+      minSubFrameCoverage: Math.round(minCoverage * 1000) / 1000,
       transparentFrameCount: transparentCount,
+      delays: uniqueDelays,
+      avgDelay: frameDelays.length > 0 ? Math.round(frameDelays.reduce((a, b) => a + b, 0) / frameDelays.length * 1000) / 1000 : 0,
+      minDelay: frameDelays.length > 0 ? Math.min(...frameDelays) : 0,
+      maxDelay: frameDelays.length > 0 ? Math.max(...frameDelays) : 0,
+      constantDelay: uniqueDelays.length <= 1,
       disposalMethods: disposals,
+      loopCount,
+      comments,
+      interlaced,
+      durationSeconds: Math.round(totalDuration * 100) / 100,
+      effectiveFps: totalDuration > 0 ? Math.round(frameDims.length / totalDuration * 10) / 10 : 0,
+      bitsPerPixel: frameDims.length > 0 ? Math.round(totalCompressed * 8 / (frameDims.length * w * h) * 10000) / 10000 : 0,
     };
   } catch {
     return null;
@@ -405,17 +470,7 @@ async function main() {
           encoder: encName, fileSize, encodingTimeMs: encTime, frameCount,
           outputWidth: outW, outputHeight: outH,
           // GIF structure
-          ...(inspection ? {
-            gifFrameCount: inspection.frameCount,
-            avgPaletteSize: inspection.avgPaletteSize,
-            avgFrameCompressedBytes: inspection.avgFrameCompressedBytes,
-            totalCompressedBytes: inspection.totalCompressedBytes,
-            fullFrameCount: inspection.fullFrameCount,
-            subFrameCount: inspection.subFrameCount,
-            avgSubFrameCoverage: inspection.avgSubFrameCoverage,
-            transparentFrameCount: inspection.transparentFrameCount,
-            disposalMethods: inspection.disposalMethods,
-          } : {}),
+          ...(inspection ? { gif: inspection } : {}),
         };
 
         // Extract GIF frames (needed for DSSIM and TFS)
@@ -469,7 +524,9 @@ async function main() {
 
         const sizeKB = (fileSize / 1024).toFixed(0);
         const vmafStr = r.vmafMean != null ? `VMAF ${r.vmafMean.toFixed(1)}` : "";
-        const subInfo = inspection ? `sub:${inspection.subFrameCount}/${inspection.frameCount} cov:${(inspection.avgSubFrameCoverage * 100).toFixed(0)}% pal:${inspection.avgPaletteSize}` : "";
+        const subInfo = inspection
+          ? `sub:${inspection.subFrameCount}/${inspection.frameCount} cov:${(inspection.avgSubFrameCoverage * 100).toFixed(0)}% pal:${inspection.minPaletteSize}-${inspection.maxPaletteSize} bpp:${inspection.bitsPerPixel} ${inspection.effectiveFps}fps`
+          : "";
         const pct = `[${completed}/${totalJobs}]`;
         console.log(`    ${encName}: ${sizeKB} KB, ${vmafStr ? vmafStr + ", " : ""}${encTime}ms, ${subInfo} ${pct}`);
       }
