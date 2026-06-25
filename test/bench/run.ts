@@ -155,19 +155,19 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     },
   };
 
-  // ── gifski (default: quality 90, lossy-quality 100) ──
+  // ── gifski (max quality: --quality 100) ──
   encoders[`gifski${suffix}`] = {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
       const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 --quality 100 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
   };
 
-  // ── gifski aggressive (quality 80, lossy-quality 30) ──
+  // ── gifski lossy (aggressive: quality 80, lossy-quality 30) ──
   encoders[`gifski-lossy${suffix}`] = {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
@@ -179,7 +179,10 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     },
   };
 
-  // ── ffmpeg (palettegen + paletteuse, the standard approach) ──
+  // ── ffmpeg (global palette, best settings for natural video) ──
+  // stats_mode=full: palette covers entire frame (best for video).
+  // floyd_steinberg: highest quality dither.
+  // diff_mode=rectangle: limits dither noise to changed region, helps LZW.
   encoders[`ffmpeg${suffix}`] = {
     available: () => hasCommand("ffmpeg"),
     encode: (framesDir, outputPath) => {
@@ -187,25 +190,47 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
         ? `scale=${targetWidth}:-1:flags=lanczos,`
         : "";
       execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle" "${outputPath}"`,
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
         { stdio: "ignore", timeout: 120000 }
       );
     },
   };
 
-  // ── ImageMagick ──
+  // ── ffmpeg per-frame palette (highest possible ffmpeg quality) ──
+  // stats_mode=single + new=1: fresh palette per frame.
+  // Best color accuracy, larger files.
+  encoders[`ffmpeg-hq${suffix}`] = {
+    available: () => hasCommand("ffmpeg"),
+    encode: (framesDir, outputPath) => {
+      const scaleFilter = targetWidth
+        ? `scale=${targetWidth}:-1:flags=lanczos,`
+        : "";
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=single[p];[s1][p]paletteuse=new=1:dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000 }
+      );
+    },
+  };
+
+  // ── ImageMagick (optimized: coalesce + OptimizePlus + OptimizeTransparency) ──
+  // -coalesce: expand all frames to full canvas before optimizing.
+  // OptimizePlus: minimal changed rectangles + frame doubling.
+  // OptimizeTransparency: replace unchanged pixels with transparency for LZW.
+  // FloydSteinberg: best dither for natural content.
   encoders[`magick${suffix}`] = {
     available: () => hasCommand("magick"),
     encode: (framesDir, outputPath) => {
       const resizeFlag = targetWidth ? `-resize ${targetWidth}x` : "";
       execSync(
-        `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resizeFlag} -layers OptimizeFrame "${outputPath}"`,
+        `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resizeFlag} -dither FloydSteinberg -colors 256 -coalesce -layers OptimizePlus -layers OptimizeTransparency "${outputPath}"`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
   };
 
-  // ── gifsicle (from ffmpeg output — gifsicle can't encode from PNGs directly) ──
+  // ── ffmpeg + gifsicle (best pipeline combo) ──
+  // ffmpeg global palette for quality, gifsicle -O3 --lossy=80 for size.
+  // --color-method=median-cut: better color distribution for photos.
   encoders[`ffmpeg+gifsicle${suffix}`] = {
     available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
     encode: (framesDir, outputPath) => {
@@ -213,14 +238,12 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
         ? `scale=${targetWidth}:-1:flags=lanczos,`
         : "";
       const tmpGif = outputPath + ".tmp.gif";
-      // ffmpeg basic encode (no fancy palette)
       execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "${tmpGif}"`,
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${tmpGif}"`,
         { stdio: "ignore", timeout: 120000 }
       );
-      // gifsicle optimize
       execSync(
-        `gifsicle -O3 --lossy=80 "${tmpGif}" -o "${outputPath}"`,
+        `gifsicle -O3 --lossy=80 --color-method=median-cut "${tmpGif}" -o "${outputPath}"`,
         { stdio: "ignore", timeout: 60000 }
       );
       try { rmSync(tmpGif); } catch {}
