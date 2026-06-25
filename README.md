@@ -151,13 +151,31 @@ Both presets share: WASM Lanczos3 downscaling, conditional shared palette, adapt
 
 ## Encode speed
 
-| Target | Time | Notes |
-|--------|------|-------|
-| gifhero CLI (Rust + Rayon) | ~0.9s / 100 frames | 16-core parallel Lanczos3 + LZW |
-| gifhero browser (TS + WASM) | ~3s / 100 frames | Single-threaded, hybrid pipeline |
-| gifski CLI | ~0.3s / 100 frames | 16-core parallel quantization |
+### Per-encoder timing (25 fixtures, native 480p, Node.js/CLI)
+
+| Encoder | Avg time | Total (25 files) | Relative |
+|---------|----------|-------------------|----------|
+| gifski-lossy | 282ms | 7.0s | 1.0× (fastest) |
+| gifski | 333ms | 8.3s | 1.2× |
+| ffmpeg | 700ms | 17.5s | 2.5× |
+| ffmpeg-hq | 1,900ms | 47.5s | 6.7× |
+| **gifhero balanced** | **2,726ms** | **68.2s** | **9.7×** |
+| gifhero quality | 2,835ms | 70.9s | 10.1× |
+| ImageMagick | 3,176ms | 79.4s | 11.3× |
+| ffmpeg + gifsicle | 3,876ms | 96.9s | 13.8× |
+
+> **Note:** these timings are from the Node.js benchmark (TS pipeline + WASM quantization). The native Rust CLI is ~3× faster (see below).
+
+### Native CLI speed
+
+| Target | Time (100 frames, 480p) | Notes |
+|--------|------------------------|-------|
+| gifhero CLI (Rust + Rayon) | ~0.9s | Parallel Lanczos3 + LZW, imagequant internal threading |
+| gifski CLI | ~0.3s | Parallel quantization via Rayon |
 
 gifski is ~3× faster per file because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking (each frame's transparency depends on the previous frame's decoded output). This sequential dependency is the cost of producing 14% smaller files.
+
+### Batch throughput
 
 For batch workloads, gifhero's CLI processes multiple files in parallel:
 
@@ -166,6 +184,13 @@ For batch workloads, gifhero's CLI processes multiple files in parallel:
 gifhero *.mp4 -w 480 -o outdir/
 # Throughput: 3.4 files/second (5.2× vs sequential)
 ```
+
+| Concurrent files | Threads/file | Throughput | Speedup |
+|-----------------|-------------|------------|---------|
+| 1 | 16 | 1.5 files/s | 2.3× |
+| 2 | 8 | 2.4 files/s | 3.6× |
+| **4** | **4** | **3.4 files/s** | **5.2×** |
+| 8 | 2 | 1.9 files/s | 2.9× |
 
 ## Browser sources
 
