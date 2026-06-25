@@ -383,7 +383,7 @@ function computeVmafMetrics(
 
   // Pass 1: VMAF + CIEDE2000 + SSIM + PSNR (reference vs distorted)
   const cmd =
-    `ffmpeg -y -framerate 20 -i "${sourceDir}/%04d.png" -i "${gifPath}" ` +
+    `ffmpeg -y -framerate 20 -i "${sourceDir}/%04d.png" -r 20 -i "${gifPath}" ` +
     `-filter_complex "` +
     `[1:v]scale=${width}:${height}:flags=bicubic[dist];` +
     `[0:v]split=3[r1][r2][r3];` +
@@ -1013,7 +1013,7 @@ async function main() {
           first.src = readFileSync(join(g.framesDir, readdirSync(g.framesDir).filter(f => f.endsWith(".png")).sort()[0]));
           const w = first.width, h = first.height;
           const logPath = join(logsDir, `${g.fixture}-${g.encoder}-vmaf.json`);
-          return `ffmpeg -y -framerate 20 -i "${g.framesDir}/%04d.png" -i "${g.gifPath}" ` +
+          return `ffmpeg -y -framerate 20 -i "${g.framesDir}/%04d.png" -r 20 -i "${g.gifPath}" ` +
             `-filter_complex "[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
             `[0:v]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
             `[r1][d1]libvmaf=log_path=${logPath}:log_fmt=json:feature=name=ciede;` +

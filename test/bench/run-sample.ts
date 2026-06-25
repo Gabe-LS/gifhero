@@ -326,7 +326,7 @@ function computeVmafMetrics(framesDir: string, gifPath: string, w: number, h: nu
   // VMAF + SSIM + PSNR + CIEDE2000
   try {
     const cmd =
-      `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -i "${gifPath}" ` +
+      `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -r 20 -i "${gifPath}" ` +
       `-filter_complex "` +
       `[0:v]scale=${w}:${h}:flags=bicubic[ref];` +
       `[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
