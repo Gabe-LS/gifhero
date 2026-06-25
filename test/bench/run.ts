@@ -130,17 +130,7 @@ const RESOLUTIONS: Array<{ suffix: string; targetWidth: number | null }> = [
 const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {};
 
 for (const { suffix, targetWidth } of RESOLUTIONS) {
-  encoders[`gifski${suffix}`] = {
-    available: () => hasCommand("gifski"),
-    encode: (framesDir, outputPath) => {
-      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
-      execSync(
-        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
-      );
-    },
-  };
-
+  // ── gifhero ──
   encoders[`gifhero-balanced${suffix}`] = {
     available: () => true,
     encode: async (framesDir, outputPath) => {
@@ -165,27 +155,75 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     },
   };
 
-  const rustBin = join(__dirname, "../../packages/gifhero-core/target/release/examples/encode_test");
-
-  encoders[`rust-balanced${suffix}`] = {
-    available: () => existsSync(rustBin),
+  // ── gifski (default: quality 90, lossy-quality 100) ──
+  encoders[`gifski${suffix}`] = {
+    available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
-      const twArg = targetWidth ? ` ${targetWidth}` : "";
+      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `"${rustBin}" "${framesDir}" "${outputPath}"${twArg}`,
-        { stdio: "ignore", timeout: 120000 },
+        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
   };
 
-  encoders[`rust-quality${suffix}`] = {
-    available: () => existsSync(rustBin),
+  // ── gifski aggressive (quality 80, lossy-quality 30) ──
+  encoders[`gifski-lossy${suffix}`] = {
+    available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
-      const twArg = targetWidth ? ` ${targetWidth}` : "";
+      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `"${rustBin}" "${framesDir}" "${outputPath}"${twArg} --quality`,
-        { stdio: "ignore", timeout: 120000 },
+        `gifski --fps 20 --quality 80 --lossy-quality 30 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
+    },
+  };
+
+  // ── ffmpeg (palettegen + paletteuse, the standard approach) ──
+  encoders[`ffmpeg${suffix}`] = {
+    available: () => hasCommand("ffmpeg"),
+    encode: (framesDir, outputPath) => {
+      const scaleFilter = targetWidth
+        ? `scale=${targetWidth}:-1:flags=lanczos,`
+        : "";
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle" "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000 }
+      );
+    },
+  };
+
+  // ── ImageMagick ──
+  encoders[`magick${suffix}`] = {
+    available: () => hasCommand("magick"),
+    encode: (framesDir, outputPath) => {
+      const resizeFlag = targetWidth ? `-resize ${targetWidth}x` : "";
+      execSync(
+        `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resizeFlag} -layers OptimizeFrame "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
+      );
+    },
+  };
+
+  // ── gifsicle (from ffmpeg output — gifsicle can't encode from PNGs directly) ──
+  encoders[`ffmpeg+gifsicle${suffix}`] = {
+    available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
+    encode: (framesDir, outputPath) => {
+      const scaleFilter = targetWidth
+        ? `scale=${targetWidth}:-1:flags=lanczos,`
+        : "";
+      const tmpGif = outputPath + ".tmp.gif";
+      // ffmpeg basic encode (no fancy palette)
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "${tmpGif}"`,
+        { stdio: "ignore", timeout: 120000 }
+      );
+      // gifsicle optimize
+      execSync(
+        `gifsicle -O3 --lossy=80 "${tmpGif}" -o "${outputPath}"`,
+        { stdio: "ignore", timeout: 60000 }
+      );
+      try { rmSync(tmpGif); } catch {}
     },
   };
 }
