@@ -155,13 +155,13 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     },
   };
 
-  // ── gifski (max quality: --quality 100) ──
+  // ── gifski (default: quality 90) ──
   encoders[`gifski${suffix}`] = {
     available: () => hasCommand("gifski"),
     encode: (framesDir, outputPath) => {
       const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `gifski --fps 20 --quality 100 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
@@ -173,7 +173,7 @@ for (const { suffix, targetWidth } of RESOLUTIONS) {
     encode: (framesDir, outputPath) => {
       const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
       execSync(
-        `gifski --fps 20 --quality 80 --lossy-quality 30 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        `gifski --fps 20 --quality 80 --lossy-quality 60 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
       );
     },
