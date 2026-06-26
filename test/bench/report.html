@@ -99,6 +99,10 @@
 
 <h2>Full Results</h2>
 <div class="filter-row">
+  <span class="label">Fixture:</span>
+  <div id="fixFilters"></div>
+</div>
+<div class="filter-row">
   <span class="label">Resolution:</span>
   <div id="resFilters"></div>
   <div class="sep"></div>
@@ -139,11 +143,12 @@ const ENCODER_LABELS = {
 let DATA = null;
 let activeRes = new Set();
 let activeEnc = new Set();
+let activeFix = null; // null = all, string = single fixture
 let sortCol = null, sortDir = 1;
 const charts = {};
 
-// Resolution display: "native" → "480p (source)"
-function resLabel(r) { return r === 'native' ? '480p (source)' : r; }
+// Resolution display: "native" → "480p"
+function resLabel(r) { return r === 'native' ? '480p' : r; }
 
 document.getElementById('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -324,6 +329,27 @@ function renderCharts(r, encoders, resolutions) {
 
 // Filters
 function renderFilters(resolutions, encoders) {
+  const fixtures = [...new Set(DATA.results.map(x => x.fixture))].sort();
+
+  // Fixture chips — single-select (click one to isolate, click again for all)
+  const fixDiv = document.getElementById('fixFilters');
+  fixDiv.innerHTML = `<span class="chip active" data-fix="__all__">All</span>` +
+    fixtures.map(f => `<span class="chip" data-fix="${f}">${f}</span>`).join('');
+  fixDiv.addEventListener('click', e => {
+    if (!e.target.classList.contains('chip')) return;
+    const val = e.target.dataset.fix;
+    if (val === '__all__') {
+      activeFix = null;
+    } else {
+      activeFix = activeFix === val ? null : val;
+    }
+    fixDiv.querySelectorAll('.chip').forEach(c => {
+      c.classList.toggle('active', activeFix === null ? c.dataset.fix === '__all__' : c.dataset.fix === activeFix);
+    });
+    renderTable(DATA.results);
+  });
+
+  // Resolution chips
   const resDiv = document.getElementById('resFilters');
   resDiv.innerHTML = resolutions.map(r => `<span class="chip active" data-res="${r}">${resLabel(r)}</span>`).join('');
   resDiv.addEventListener('click', e => {
@@ -333,6 +359,7 @@ function renderFilters(resolutions, encoders) {
     renderTable(DATA.results);
   });
 
+  // Encoder chips
   const encDiv = document.getElementById('encFilters');
   encDiv.innerHTML = encoders.map(e => `<span class="chip active" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_LABELS[e] || e}</span>`).join('');
   encDiv.addEventListener('click', e => {
@@ -363,7 +390,11 @@ const COLUMNS = [
 function getVal(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
 
 function renderTable(allResults) {
-  const filtered = allResults.filter(x => activeRes.has(x.resolution) && activeEnc.has(x.encoder));
+  const filtered = allResults.filter(x =>
+    activeRes.has(x.resolution) &&
+    activeEnc.has(x.encoder) &&
+    (activeFix === null || x.fixture === activeFix)
+  );
 
   const head = document.getElementById('tableHead');
   head.innerHTML = COLUMNS.map((col, i) => {
