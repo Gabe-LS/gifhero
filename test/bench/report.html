@@ -182,8 +182,10 @@ function loadReport() {
   const r = DATA.results;
   const resolutions = [...new Set(r.map(x => x.resolution))];
   const encoders = [...new Set(r.map(x => x.encoder))];
-  activeRes = new Set(resolutions);
-  activeEnc = new Set(encoders);
+  // Default filters: 480p only, gifhero + gifski only
+  activeRes = new Set(['native']);
+  const defaultEncoders = ['gifhero-balanced', 'gifhero-quality', 'gifski', 'gifski-lossy'];
+  activeEnc = new Set(encoders.filter(e => defaultEncoders.includes(e)));
 
   // Meta line
   const fixtures = [...new Set(r.map(x => x.fixture))];
@@ -353,7 +355,9 @@ function renderFilters(resolutions, encoders) {
 
   // Resolution chips
   const resDiv = document.getElementById('resFilters');
-  resDiv.innerHTML = resolutions.map(r => `<span class="chip active" data-res="${r}">${resLabel(r)}</span>`).join('');
+  resDiv.innerHTML = resolutions.map(r =>
+    `<span class="chip${activeRes.has(r) ? ' active' : ''}" data-res="${r}">${resLabel(r)}</span>`
+  ).join('');
   resDiv.addEventListener('click', e => {
     if (!e.target.classList.contains('chip')) return;
     e.target.classList.toggle('active');
@@ -363,7 +367,9 @@ function renderFilters(resolutions, encoders) {
 
   // Encoder chips
   const encDiv = document.getElementById('encFilters');
-  encDiv.innerHTML = encoders.map(e => `<span class="chip active" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_LABELS[e] || e}</span>`).join('');
+  encDiv.innerHTML = encoders.map(e =>
+    `<span class="chip${activeEnc.has(e) ? ' active' : ''}" data-enc="${e}" style="border-color:${ENCODER_COLORS[e] || '#888'}">${ENCODER_LABELS[e] || e}</span>`
+  ).join('');
   encDiv.addEventListener('click', e => {
     if (!e.target.classList.contains('chip')) return;
     e.target.classList.toggle('active');
