@@ -41,8 +41,9 @@
   tr.highlight td { background: rgba(63,185,80,0.06); }
   .bar { display: inline-block; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 5px; min-width: 2px; }
 
+  .filter-group { margin-bottom: 14px; }
+  .filter-label { font-size: 0.78rem; color: var(--text2); font-weight: 600; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
   .filter-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
-  .filter-row .label { font-size: 0.78rem; color: var(--text2); font-weight: 600; margin-right: 2px; }
   .chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; cursor: pointer; border: 1px solid var(--border); margin: 2px; transition: all 0.15s; }
   .chip.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
   .chip:hover { border-color: var(--accent); }
@@ -98,15 +99,16 @@
 <div class="card chart-card"><canvas id="chartResolution"></canvas></div>
 
 <h2>Full Results</h2>
-<div class="filter-row">
-  <span class="label">Fixture:</span>
+<div class="filter-group">
+  <div class="filter-label">Fixture</div>
   <div id="fixFilters"></div>
 </div>
-<div class="filter-row">
-  <span class="label">Resolution:</span>
+<div class="filter-group">
+  <div class="filter-label">Resolution</div>
   <div id="resFilters"></div>
-  <div class="sep"></div>
-  <span class="label">Encoder:</span>
+</div>
+<div class="filter-group">
+  <div class="filter-label">Encoder</div>
   <div id="encFilters"></div>
 </div>
 <div style="overflow-x: auto;">
