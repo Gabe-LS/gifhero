@@ -10,7 +10,7 @@
  */
 
 import { createServer } from "http";
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, readdirSync } from "fs";
 import { join, extname } from "path";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
@@ -209,6 +209,23 @@ const server = createServer(async (req, res) => {
       res.end((err as Error).message);
     } finally {
       try { execSync(`rm -rf "${tmpDir}"`); } catch {}
+    }
+    return;
+  }
+
+  // ── /api/bench-results endpoint (list latest benchmark JSON) ──
+  if (req.method === "GET" && req.url === "/api/bench-results") {
+    const resultsDir = join(ROOT, "test/bench/results");
+    try {
+      const files = readdirSync(resultsDir)
+        .filter(f => f.startsWith("bench-") && f.endsWith(".json"))
+        .sort();
+      const latest = files.length > 0 ? files[files.length - 1] : null;
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ latest, files }));
+    } catch {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ latest: null, files: [] }));
     }
     return;
   }

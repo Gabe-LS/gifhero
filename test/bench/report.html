@@ -152,6 +152,22 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   loadReport();
 });
 
+// Auto-load latest results via /api/bench-results endpoint
+(async () => {
+  try {
+    const r = await fetch('/api/bench-results');
+    if (!r.ok) return;
+    const { latest } = await r.json();
+    if (!latest) return;
+    const dr = await fetch('/test/bench/results/' + latest);
+    if (!dr.ok) return;
+    DATA = await dr.json();
+    document.getElementById('loadStatus').innerHTML =
+      '<p style="color:#3fb950">Auto-loaded: ' + latest + '</p>';
+    loadReport();
+  } catch {}
+})();
+
 function loadReport() {
   document.getElementById('loadStatus').style.display = 'none';
   document.getElementById('report').style.display = 'block';
@@ -341,6 +357,7 @@ const COLUMNS = [
   { key: 'gif.bitsPerPixel', label: 'BPP', fmt: v => v != null ? v.toFixed(3) : '' },
   { key: 'gif.subFrameCount', label: 'Sub-frames', fmt: (v, row) => { const g = row?.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
   { key: 'gif.avgSubFrameCoverage', label: 'Coverage', fmt: v => v != null && v > 0 ? (v * 100).toFixed(0) + '%' : '' },
+  { key: 'flickerScore', label: 'TFS', fmt: v => v != null ? v.toFixed(4) : '' },
 ];
 
 function getVal(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
