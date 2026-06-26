@@ -538,21 +538,30 @@ async function measureEncoder(
   let dssimP95: number | null = null;
   let flickerScore: number | null = null;
 
-  if (validation.valid) {
+  const outW = validation.width || 0;
+  const outH = validation.height || 0;
+
+  if (validation.valid || (outW > 0 && outH > 0)) {
     if (vmafAvailable) {
       try {
-        vmafMetrics = computeVmafMetrics(framesDir, outputPath, validation.width, validation.height, logsDir);
+        vmafMetrics = computeVmafMetrics(framesDir, outputPath, outW, outH, logsDir);
       } catch {}
     }
     if (dssimAvail) {
       try {
-        const d = dssimFrames(framesDir, extractDir);
+        const srcImg = new Image();
+        const srcFiles = readdirSync(framesDir).filter((f: string) => f.endsWith(".png")).sort();
+        srcImg.src = readFileSync(join(framesDir, srcFiles[0]));
+        const needsScale = srcImg.width !== outW || srcImg.height !== outH;
+        const d = needsScale
+          ? dssimFrames(framesDir, extractDir, outW, outH)
+          : dssimFrames(framesDir, extractDir);
         dssimMean = d.mean; dssimMax = d.max; dssimP95 = d.p95;
       } catch {}
     }
     if (frameCount >= 2 && !FAST_MODE) {
       try {
-        flickerScore = computeTFS(framesDir, extractDir, validation.width, validation.height, frameCount);
+        flickerScore = computeTFS(framesDir, extractDir, outW, outH, frameCount);
       } catch {}
     }
   }
@@ -641,15 +650,18 @@ async function benchmarkEncoder(
   let dssimP95: number | null = null;
   let flickerScore: number | null = null;
 
-  if (validation.valid) {
+  const encW = validation.width || 0;
+  const encH = validation.height || 0;
+
+  if (validation.valid || (encW > 0 && encH > 0)) {
     // VMAF suite
     if (vmafAvailable) {
       try {
         vmafMetrics = computeVmafMetrics(
           framesDir,
           outputPath,
-          validation.width,
-          validation.height,
+          encW,
+          encH,
           logsDir
         );
       } catch (err) {
@@ -660,7 +672,13 @@ async function benchmarkEncoder(
     // DSSIM
     if (dssimAvail) {
       try {
-        const dssim = dssimFrames(framesDir, extractDir);
+        const srcFiles = readdirSync(framesDir).filter((f: string) => f.endsWith(".png")).sort();
+        const srcImg = new Image();
+        srcImg.src = readFileSync(join(framesDir, srcFiles[0]));
+        const needsScale = srcImg.width !== encW || srcImg.height !== encH;
+        const dssim = needsScale
+          ? dssimFrames(framesDir, extractDir, encW, encH)
+          : dssimFrames(framesDir, extractDir);
         dssimMean = dssim.mean;
         dssimMax = dssim.max;
         dssimP95 = dssim.p95;
@@ -1071,7 +1089,16 @@ async function main() {
         const extractDir = join(TEMP_DIR, "frames", `${g.fixture}-${g.encoder}`);
         try {
           extractGifFrames(g.gifPath, extractDir);
-          const d = dssimFrames(g.framesDir, extractDir);
+          const srcFiles = readdirSync(g.framesDir).filter((f: string) => f.endsWith(".png")).sort();
+          const srcImg = new Image();
+          srcImg.src = readFileSync(join(g.framesDir, srcFiles[0]));
+          const extFiles = readdirSync(extractDir).filter((f: string) => f.endsWith(".png")).sort();
+          const extImg = new Image();
+          extImg.src = readFileSync(join(extractDir, extFiles[0]));
+          const needsScale = srcImg.width !== extImg.width || srcImg.height !== extImg.height;
+          const d = needsScale
+            ? dssimFrames(g.framesDir, extractDir, extImg.width, extImg.height)
+            : dssimFrames(g.framesDir, extractDir);
           dssimMean = d.mean; dssimMax = d.max; dssimP95 = d.p95;
         } catch {}
       }

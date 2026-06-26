@@ -495,30 +495,42 @@ async function main() {
           } catch {}
         }
 
-        // DSSIM
+        // DSSIM (use actual extracted frame dimensions for scaling)
         if (enabledMetrics.has("dssim") && dssimOk && framesExtracted) {
           try {
-            const d = dssimFrames(srcDir, extractDir);
-            r.dssimMean = d.mean; r.dssimMax = d.max; r.dssimP95 = d.p95;
+            const extPngs = readdirSync(extractDir).filter(f => f.endsWith(".png")).sort();
+            if (extPngs.length > 0) {
+              const extImg = new Image();
+              extImg.src = readFileSync(join(extractDir, extPngs[0]));
+              const needsScale = extImg.width !== nativeW || extImg.height !== nativeH;
+              const d = needsScale
+                ? dssimFrames(srcDir, extractDir, extImg.width, extImg.height)
+                : dssimFrames(srcDir, extractDir);
+              r.dssimMean = d.mean; r.dssimMax = d.max; r.dssimP95 = d.p95;
+            }
           } catch {}
         }
 
-        // TFS
+        // TFS (use actual extracted frame dimensions)
         if (enabledMetrics.has("tfs") && framesExtracted && frameCount >= 2) {
           try {
             const srcPngs = readdirSync(srcDir).filter(f => f.endsWith(".png")).sort();
             const extPngs = readdirSync(extractDir).filter(f => f.endsWith(".png")).sort();
-            const count = Math.min(srcPngs.length, extPngs.length);
-            const srcFrames: Uint8ClampedArray[] = [], encFrames: Uint8ClampedArray[] = [];
-            for (let i = 0; i < count; i++) {
-              const s = new Image(); s.src = readFileSync(join(srcDir, srcPngs[i]));
-              const sc = createCanvas(outW, outH); sc.getContext("2d").drawImage(s, 0, 0, outW, outH);
-              srcFrames.push(sc.getContext("2d").getImageData(0, 0, outW, outH).data);
-              const e = new Image(); e.src = readFileSync(join(extractDir, extPngs[i]));
-              const ec = createCanvas(outW, outH); ec.getContext("2d").drawImage(e, 0, 0, outW, outH);
-              encFrames.push(ec.getContext("2d").getImageData(0, 0, outW, outH).data);
+            if (extPngs.length > 0) {
+              const extImg = new Image(); extImg.src = readFileSync(join(extractDir, extPngs[0]));
+              const tw = extImg.width, th = extImg.height;
+              const count = Math.min(srcPngs.length, extPngs.length);
+              const srcFrames: Uint8ClampedArray[] = [], encFrames: Uint8ClampedArray[] = [];
+              for (let i = 0; i < count; i++) {
+                const s = new Image(); s.src = readFileSync(join(srcDir, srcPngs[i]));
+                const sc = createCanvas(tw, th); sc.getContext("2d").drawImage(s, 0, 0, tw, th);
+                srcFrames.push(sc.getContext("2d").getImageData(0, 0, tw, th).data);
+                const e = new Image(); e.src = readFileSync(join(extractDir, extPngs[i]));
+                const ec = createCanvas(tw, th); ec.getContext("2d").drawImage(e, 0, 0, tw, th);
+                encFrames.push(ec.getContext("2d").getImageData(0, 0, tw, th).data);
+              }
+              r.flickerScore = computeFlickerScore(srcFrames, encFrames, tw, th).score;
             }
-            r.flickerScore = computeFlickerScore(srcFrames, encFrames, outW, outH).score;
           } catch {}
         }
 

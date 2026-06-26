@@ -55,12 +55,20 @@ export function dssimPair(original: string, encoded: string): number {
 
 /**
  * Compute DSSIM for all frame pairs between source and encoded directories.
+ * When dimensions differ, source frames are scaled to match the encoded size.
  *
  * @param sourceDir - Directory of original PNG frames (0001.png, 0002.png, ...)
  * @param encodedDir - Directory of GIF-extracted PNG frames
+ * @param targetW - Target width to scale source frames to (omit if same resolution)
+ * @param targetH - Target height to scale source frames to
  * @returns Aggregate DSSIM metrics
  */
-export function dssimFrames(sourceDir: string, encodedDir: string): DssimResult {
+export function dssimFrames(
+  sourceDir: string,
+  encodedDir: string,
+  targetW?: number,
+  targetH?: number,
+): DssimResult {
   const sourceFiles = readdirSync(sourceDir)
     .filter((f: string) => f.endsWith(".png"))
     .sort();
@@ -73,11 +81,33 @@ export function dssimFrames(sourceDir: string, encodedDir: string): DssimResult 
     throw new Error(`No PNG frames found in ${sourceDir} or ${encodedDir}`);
   }
 
+  // Scale source frames if dimensions differ
+  let scaledDir: string | null = null;
+  let effectiveSourceDir = sourceDir;
+  if (targetW && targetH) {
+    scaledDir = `${encodedDir}/../_dssim_scaled_${targetW}x${targetH}`;
+    mkdirSync(scaledDir, { recursive: true });
+    for (let i = 0; i < frameCount; i++) {
+      const src = `${sourceDir}/${sourceFiles[i]}`;
+      const dst = `${scaledDir}/${sourceFiles[i]}`;
+      execSync(
+        `ffmpeg -y -i "${src}" -vf "scale=${targetW}:${targetH}:flags=bicubic" "${dst}"`,
+        { stdio: "ignore", timeout: 10000 },
+      );
+    }
+    effectiveSourceDir = scaledDir;
+  }
+
   const values: number[] = [];
   for (let i = 0; i < frameCount; i++) {
-    const sourcePath = `${sourceDir}/${sourceFiles[i]}`;
+    const sourcePath = `${effectiveSourceDir}/${sourceFiles[i]}`;
     const encodedPath = `${encodedDir}/${encodedFiles[i]}`;
     values.push(dssimPair(sourcePath, encodedPath));
+  }
+
+  // Clean up scaled frames
+  if (scaledDir) {
+    try { execSync(`rm -rf "${scaledDir}"`, { stdio: "ignore" }); } catch {}
   }
 
   values.sort((a, b) => a - b);
