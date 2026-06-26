@@ -373,20 +373,21 @@ function renderFilters(resolutions, encoders) {
 }
 
 // Table
+// bestDir: 1 = lower is better (first click sorts ascending), -1 = higher is better (first click sorts descending)
 const COLUMNS = [
-  { key: 'fixture', label: 'Fixture', fmt: v => v || '' },
-  { key: 'resolution', label: 'Resolution', fmt: v => resLabel(v) },
-  { key: 'encoder', label: 'Encoder', fmt: (v) => `<span style="color:${ENCODER_COLORS[v] || '#888'}; font-size:1.1em">●</span> ${ENCODER_LABELS[v] || v}` },
-  { key: 'fileSize', label: 'Size', fmt: v => v != null ? `<span class="bar" style="width:${Math.min(80, v/1024/14*80)}px;background:var(--accent)"></span>${(v/1024).toFixed(0)} KB` : '' },
-  { key: 'encodingTimeMs', label: 'Encode Time', fmt: v => v != null ? (v < 1000 ? v + 'ms' : (v/1000).toFixed(1) + 's') : '' },
-  { key: 'vmafMean', label: 'VMAF', fmt: v => v != null ? v.toFixed(1) : '' },
-  { key: 'ssimMean', label: 'SSIM', fmt: v => v != null ? v.toFixed(4) : '' },
-  { key: 'dssimMean', label: 'DSSIM', fmt: v => v != null ? v.toFixed(4) : '' },
-  { key: 'gif.avgPaletteSize', label: 'Palette', fmt: v => v != null && v > 0 ? v : '' },
-  { key: 'gif.bitsPerPixel', label: 'BPP', fmt: v => v != null ? v.toFixed(3) : '' },
-  { key: 'gif.subFrameCount', label: 'Sub-frames', fmt: (v, row) => { const g = row?.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
-  { key: 'gif.avgSubFrameCoverage', label: 'Coverage', fmt: v => v != null && v > 0 ? (v * 100).toFixed(0) + '%' : '' },
-  { key: 'flickerScore', label: 'TFS', fmt: v => v != null ? v.toFixed(4) : '' },
+  { key: 'fixture', label: 'Fixture', bestDir: 1, fmt: v => v || '' },
+  { key: 'resolution', label: 'Resolution', bestDir: 1, fmt: v => resLabel(v) },
+  { key: 'encoder', label: 'Encoder', bestDir: 1, fmt: (v) => `<span style="color:${ENCODER_COLORS[v] || '#888'}; font-size:1.1em">●</span> ${ENCODER_LABELS[v] || v}` },
+  { key: 'fileSize', label: 'Size', bestDir: 1, fmt: v => v != null ? `<span class="bar" style="width:${Math.min(80, v/1024/14*80)}px;background:var(--accent)"></span>${(v/1024).toFixed(0)} KB` : '' },
+  { key: 'encodingTimeMs', label: 'Encode Time', bestDir: 1, fmt: v => v != null ? (v < 1000 ? v + 'ms' : (v/1000).toFixed(1) + 's') : '' },
+  { key: 'vmafMean', label: 'VMAF', bestDir: -1, fmt: v => v != null ? v.toFixed(1) : '' },
+  { key: 'ssimMean', label: 'SSIM', bestDir: -1, fmt: v => v != null ? v.toFixed(4) : '' },
+  { key: 'dssimMean', label: 'DSSIM', bestDir: 1, fmt: v => v != null ? v.toFixed(4) : '' },
+  { key: 'gif.avgPaletteSize', label: 'Palette', bestDir: -1, fmt: v => v != null && v > 0 ? v : '' },
+  { key: 'gif.bitsPerPixel', label: 'BPP', bestDir: 1, fmt: v => v != null ? v.toFixed(3) : '' },
+  { key: 'gif.subFrameCount', label: 'Sub-frames', bestDir: -1, fmt: (v, row) => { const g = row?.gif; return g ? `${g.subFrameCount}/${g.frameCount}` : ''; } },
+  { key: 'gif.avgSubFrameCoverage', label: 'Coverage', bestDir: 1, fmt: v => v != null && v > 0 ? (v * 100).toFixed(0) + '%' : '' },
+  { key: 'flickerScore', label: 'TFS', bestDir: 1, fmt: v => v != null ? v.toFixed(4) : '' },
 ];
 
 function getVal(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
@@ -409,7 +410,7 @@ function renderTable(allResults) {
     th.addEventListener('click', () => {
       const col = parseInt(th.dataset.col);
       if (sortCol === col) sortDir *= -1;
-      else { sortCol = col; sortDir = 1; }
+      else { sortCol = col; sortDir = COLUMNS[col].bestDir; }
       renderTable(allResults);
     });
   });
