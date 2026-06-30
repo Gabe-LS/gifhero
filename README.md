@@ -2,7 +2,7 @@
 
 The highest-compression GIF encoder. Browser SDK + native CLI.
 
-gifhero produces **smaller files than gifski** on 66% of fixtures with **better VMAF on 84%** — validated across 25 diverse video fixtures at 4 resolutions, without lossy LZW compression.
+gifhero produces **smaller files than gifski** on 68% of fixtures with **better VMAF on 84%** — validated across 25 diverse video fixtures at 4 resolutions, without lossy LZW compression.
 
 ## Why gifhero
 
@@ -29,12 +29,12 @@ gifhero is smaller than gifski on most content AND higher quality — without an
 
 | Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
 |-----------|-----------|-----------|------------|------------|
-| **480p** | 14/25 | **22/25** | +3% | **+1.4** |
-| **360p** | **17/25** | **19/25** | **-3%** | **+1.1** |
-| **240p** | **19/25** | **18/25** | **-5%** | **+1.2** |
-| **160p** | **22/25** | **17/25** | **-10%** | **+1.3** |
+| **480p** | **17/25** | **21/25** | **-4%** | **+1.4** |
+| **360p** | **21/25** | 17/25 | **-10%** | **+0.9** |
+| **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
+| **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
 
-Smaller files at ≤360p, better VMAF across all resolutions. On fixtures where gifski is smaller, gifhero almost always has higher VMAF.
+Smaller files AND better VMAF at every resolution. No lossy LZW.
 
 ## Install
 

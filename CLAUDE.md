@@ -229,7 +229,7 @@ Maximum VMAF and minimal posterization. Best for visual fidelity.
 
 ### balanced (default)
 Maximum compression with reduced posterization. Best for file size.
-- quantizer: imagequant (q95, speed 4)
+- quantizer: imagequant (q90, speed 4)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
 - staleThreshold: content-adaptive, min(8, max(2, round(4 + 4 × min(1, complexity/8000))))
@@ -306,14 +306,14 @@ Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own
 
 ## Results vs gifski (25 fixtures × 4 resolutions, no lossy LZW)
 
-| Resolution | Size wins | VMAF wins | Avg VMAF Δ |
-|-----------|-----------|-----------|------------|
-| **480p** | **16/25** | **21/25** | **+1.8** |
-| **360p** | **16/25** | **22/25** | **+2.1** |
-| **240p** | **17/25** | **22/25** | **+2.4** |
-| **160p** | **18/25** | **21/25** | **+2.5** |
+| Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
+|-----------|-----------|-----------|------------|------------|
+| **480p** | **17/25** | **21/25** | **-4%** | **+1.4** |
+| **360p** | **21/25** | 17/25 | **-10%** | **+0.9** |
+| **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
+| **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
 
-Smaller files on ~66% of fixtures with better VMAF on ~84%. On fixtures where gifski is smaller, gifhero almost always has higher VMAF.
+Smaller files AND better VMAF at every resolution. No lossy LZW.
 
 ## Current Phase
 Rust port complete. Two delivery targets from one pipeline:
@@ -334,7 +334,7 @@ Rust port complete. Two delivery targets from one pipeline:
 
 ### Presets
 - **quality** (q98, speed 1): maximum VMAF, lower staleThreshold, no denoiser
-- **balanced** (q95, speed 4): maximum compression, content-adaptive staleThreshold, noise-aware temporal denoiser
+- **balanced** (q90, speed 4): maximum compression, content-adaptive staleThreshold, noise-aware temporal denoiser
 
 Shared pipeline features: palette fitness model (shared palette + fast remap), edge sparse suppression, deferred LZW clear code, power-of-2 palette targeting, keyframe detection, WASM Lanczos3 downscaling, content-adaptive staleThreshold.
 
