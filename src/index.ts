@@ -227,7 +227,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
   },
   balanced: {
     quantizer: "imagequant",
-    quantizerQuality: 95,
+    quantizerQuality: 90,
     quantizerSpeed: 4,
     maxColors: 256,
     palette: "crossframe",
@@ -551,19 +551,17 @@ async function encodeSubframePipeline(
     neuquantPalettes = generatePalettes(frames, opts.palette, opts.quantizerQuality);
   }
 
-  // Content-adaptive stale threshold.
+  // Content-adaptive stale threshold. The product of motion level
+  // and color complexity predicts per-frame palette divergence:
+  // high divergence needs a looser threshold to find transparency.
+  // Scale down proportionally to downscale ratio: at lower resolutions,
+  // Lanczos3 smoothing makes inter-frame diffs smaller, so a fixed
   const complexity = probe.motionLevel * probe.colorComplexity;
-  // Extreme motion (>0.4) with low gradient density: the eye tracks
-  // overall motion, not individual pixels — trailing is invisible.
-  // Raise the threshold to allow more transparency and smaller files.
-  // But if gradients are present (color-wheel), trailing IS visible
-  // as banding — keep the conservative adjustment.
-  const isExtremeMotion = probe.motionLevel > 0.4 && probe.gradientDensity < 0.25;
-  const motionAdjust = isExtremeMotion
-    ? +2
-    : (probe.motionLevel > 0.2
-      ? -Math.round(Math.min(3, (probe.motionLevel - 0.2) * 5))
-      : 0);
+  // High motion makes stale pixels visible as trailing — reduce
+  // threshold so fewer pixels are marked transparent.
+  const motionAdjust = probe.motionLevel > 0.2
+    ? -Math.round(Math.min(3, (probe.motionLevel - 0.2) * 5))
+    : 0;
   let autoThreshold: number;
   if (isQuality) {
     const motionFloor = probe.motionLevel > 0.01 ? 5 : 4;
@@ -582,22 +580,7 @@ async function encodeSubframePipeline(
 
   if (t) t.palette = Math.round(performance.now() - t0);
 
-  // Keyframe cooldown: limit scene-change keyframes to max 1 per 5 frames
-  // (250ms at 20fps). During cooldown, only trigger on >85% pixel change
-  // (definite hard cut). Prevents fast-action content from triggering
-  // a keyframe on every other frame.
-  const KEYFRAME_COOLDOWN = 5;
-  const EMERGENCY_THRESHOLD = 0.85;
-  const filteredSceneChanges: number[] = [];
-  let lastKeyframe = -Infinity;
-  for (const f of probe.sceneChanges) {
-    const inCooldown = (f - lastKeyframe) < KEYFRAME_COOLDOWN;
-    if (!inCooldown || (probe.perFrameMotion[f] ?? 0) > EMERGENCY_THRESHOLD) {
-      filteredSceneChanges.push(f);
-      lastKeyframe = f;
-    }
-  }
-  const sceneChangeSet = new Set(filteredSceneChanges);
+  const sceneChangeSet = new Set(probe.sceneChanges);
 
   // Palette fitness: reuse a per-frame palette across subsequent frames
   // when the palette still represents the content well. Measures p95
