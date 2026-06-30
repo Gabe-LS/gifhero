@@ -569,29 +569,29 @@ async function encodeSubframePipeline(
 
   const sceneChangeSet = new Set(probe.sceneChanges);
 
-  // Palette fitness: mean max-channel distance from source pixels to
-  // nearest palette color. When this exceeds the threshold, the palette
-  // no longer represents the content well and needs rebuilding.
-  const PALETTE_FITNESS_THRESHOLD = 12;
-  const MAX_FRAMES_PER_PALETTE = 30;
+  // Palette fitness: reuse a per-frame palette across subsequent frames
+  // when the palette still represents the content well. Measures p95
+  // nearest-color distance (catches gradient gaps that mean misses).
+  const MAX_FRAMES_PER_PALETTE = 10;
+  const PALETTE_FITNESS_THRESHOLD = 8;
 
-  function paletteFitness(rgba: Uint8ClampedArray, pal: Uint8Array): number {
-    const palCount = pal.length / 3;
+  function paletteP95Distance(rgba: Uint8ClampedArray, pal: Uint8Array): number {
+    const palCount = pal.length / 4;
     const sampleStep = Math.max(1, Math.floor(numPixels / 2000));
-    let totalDist = 0, samples = 0;
+    const dists: number[] = [];
     for (let j = 0; j < numPixels; j += sampleStep) {
       const si = j * 4;
       const sr = rgba[si], sg = rgba[si + 1], sb = rgba[si + 2];
       let bestDist = 765;
       for (let p = 0; p < palCount; p++) {
-        const pi = p * 3;
+        const pi = p * 4;
         const d = Math.abs(sr - pal[pi]) + Math.abs(sg - pal[pi + 1]) + Math.abs(sb - pal[pi + 2]);
         if (d < bestDist) bestDist = d;
       }
-      totalDist += bestDist;
-      samples++;
+      dists.push(bestDist);
     }
-    return samples > 0 ? totalDist / samples : 0;
+    dists.sort((a, b) => a - b);
+    return dists[Math.floor(dists.length * 0.95)] ?? 0;
   }
 
   let activePaletteRgba: Uint8Array | null = null;
@@ -602,64 +602,52 @@ async function encodeSubframePipeline(
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
 
-    // Decide whether this frame needs full quantization or can remap
     const isKeyframe = i === 0 || sceneChangeSet.has(i);
-    let needsFullQuantize = isKeyframe;
-    if (!isKeyframe && useGifQuant) {
-      if (!activePaletteRgba || framesSincePalette >= MAX_FRAMES_PER_PALETTE) {
-        needsFullQuantize = true;
-      } else {
-        const rgbPal = rgbaToRgbPalette(activePaletteRgba, activePaletteRgba.length / 4);
-        const fitness = paletteFitness(frames[i].data, rgbPal);
-        if (fitness > PALETTE_FITNESS_THRESHOLD) {
-          needsFullQuantize = true;
-        }
-      }
+
+    // Decide: full quantize or remap with existing palette
+    let useRemap = false;
+    if (!isKeyframe && useGifQuant && activePaletteRgba && framesSincePalette < MAX_FRAMES_PER_PALETTE) {
+      const p95 = paletteP95Distance(frames[i].data, activePaletteRgba);
+      if (p95 <= PALETTE_FITNESS_THRESHOLD) useRemap = true;
     }
 
-    // ── Keyframe or palette stale: full-frame quantize, reset canvas ──
-    if (isKeyframe || needsFullQuantize) {
+    // ── Keyframe: full-frame quantize, reset canvas ──
+    if (isKeyframe) {
       let indexed: Uint8Array, palette: Uint8Array;
 
-      if (isKeyframe) {
-        // Frame 0 / scene change: build shared palette, remap frame against it
-        if (useGifQuant) {
-          const sampleFrames: Uint8ClampedArray[] = [frames[i].data];
-          for (let s = 1; s <= 3 && i + s < frames.length; s++) sampleFrames.push(frames[i + s].data);
-          activePaletteRgba = gifBuildPalette(
-            sampleFrames, width, height,
-            opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
-          );
-          const emptyCanvas = new Uint8ClampedArray(numPixels * 4);
-          const r = gifRemapPalette(frames[i].data, width, height, activePaletteRgba, emptyCanvas);
-          palette = rgbaToRgbPalette(r.palette, r.paletteCount);
-          indexed = r.indexed;
-        } else if (globalPalette) {
-          palette = globalPalette;
-          indexed = opts.dither === "floyd-steinberg"
-            ? floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine)
-            : mapNearest(frames[i].data, palette);
-        } else {
-          ({ indexed, palette } = await quantizeFrame(
-            frames[i].data, width, height, opts, neuquantPalettes?.[i],
-          ));
-        }
-
-        const trimmed = trimPalette(palette, indexed);
-        indexed = trimmed.indexed;
-        palette = trimmed.palette;
-
-        gifFrames[i] = {
-          indexedPixels: indexed, palette, width, height,
-          delay, disposal: 0,
-        };
-        decodeFrameToCanvas(canvasRgba, indexed, palette, width, height);
+      if (useGifQuant) {
+        const r = gifQuantSimple(
+          frames[i].data, width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
+        );
+        palette = rgbaToRgbPalette(r.palette, r.paletteCount);
+        indexed = r.indexed;
+        activePaletteRgba = gifBuildPalette(
+          [frames[i].data], width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+        );
         framesSincePalette = 0;
-        continue;
+      } else if (globalPalette) {
+        palette = globalPalette;
+        indexed = opts.dither === "floyd-steinberg"
+          ? floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine)
+          : mapNearest(frames[i].data, palette);
+      } else {
+        ({ indexed, palette } = await quantizeFrame(
+          frames[i].data, width, height, opts, neuquantPalettes?.[i],
+        ));
       }
 
-      // Non-keyframe but palette stale: full quantize with background
-      // (falls through to the background-aware path below with forced rebuild)
+      const trimmed = trimPalette(palette, indexed);
+      indexed = trimmed.indexed;
+      palette = trimmed.palette;
+
+      gifFrames[i] = {
+        indexedPixels: indexed, palette, width, height,
+        delay, disposal: 0,
+      };
+      decodeFrameToCanvas(canvasRgba, indexed, palette, width, height);
+      continue;
     }
 
     // ── Frames 1+: background-aware path ──
@@ -753,20 +741,24 @@ async function encodeSubframePipeline(
       let r: GifQuantResult;
       if (sharedPalette) {
         r = gifRemapPalette(inputRgba, width, height, sharedPalette, canvasRgba);
-      } else if (needsFullQuantize || !activePaletteRgba) {
-        // Rebuild palette from nearby frames for better segment coverage
-        const sampleFrames: Uint8ClampedArray[] = [frames[i].data];
-        for (let s = 1; s <= 3 && i + s < frames.length; s++) sampleFrames.push(frames[i + s].data);
-        activePaletteRgba = gifBuildPalette(
-          sampleFrames, width, height,
-          opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
-        );
+      } else if (useRemap && activePaletteRgba) {
         r = gifRemapPalette(inputRgba, width, height, activePaletteRgba, canvasRgba);
-        framesSincePalette = 0;
+        framesSincePalette++;
       } else {
-        r = gifRemapPalette(inputRgba, width, height, activePaletteRgba, canvasRgba);
+        r = gifQuantBg(
+            inputRgba, width, height,
+            canvasRgba, importanceMap,
+            opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
+          );
+        // Build remap palette only on the first full-quantize of a segment
+        if (!activePaletteRgba || framesSincePalette >= MAX_FRAMES_PER_PALETTE) {
+          activePaletteRgba = gifBuildPalette(
+            [frames[i].data], width, height,
+            opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+          );
+        }
+        framesSincePalette = 0;
       }
-      framesSincePalette++;
 
       tQuantize += performance.now() - ts;
       ts = performance.now();
