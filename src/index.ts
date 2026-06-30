@@ -771,7 +771,7 @@ async function encodeSubframePipeline(
       const tIdx = r.transparentIndex;
       const rgbPal = rgbaToRgbPalette(r.palette, r.paletteCount);
 
-      // Bounding box of non-transparent pixels
+      // Initial bounding box
       let minX = width, maxX = -1, minY = height, maxY = -1;
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -780,6 +780,63 @@ async function encodeSubframePipeline(
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
             if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      // Edge-only sparse suppression: suppress isolated near-stale opaque
+      // pixels in the outermost 20% of the bbox to shrink it. Interior
+      // pixels are never modified.
+      if (maxX >= 0) {
+        const bw = maxX - minX + 1, bh = maxY - minY + 1;
+        const marginX = Math.max(4, Math.round(bw * 0.2));
+        const marginY = Math.max(4, Math.round(bh * 0.2));
+        const sparseThreshold = staleThreshold + 2;
+        const sparseRadius = 6;
+
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            const inEdge = (x - minX < marginX) || (maxX - x < marginX) ||
+                           (y - minY < marginY) || (maxY - y < marginY);
+            if (!inEdge) continue;
+            const idx = y * width + x;
+            if (r.indexed[idx] === tIdx) continue;
+            const si = idx * 4;
+            const d = Math.max(
+              Math.abs(curr[si] - canvasRgba[si]),
+              Math.abs(curr[si+1] - canvasRgba[si+1]),
+              Math.abs(curr[si+2] - canvasRgba[si+2]),
+            );
+            if (d > sparseThreshold) continue;
+            let hasNeighbor = false;
+            const rowStart = y * width;
+            const xLo = Math.max(minX, x - sparseRadius);
+            const xHi = Math.min(maxX, x + sparseRadius);
+            for (let nx = xLo; nx <= xHi; nx++) {
+              if (nx === x) continue;
+              if (r.indexed[rowStart + nx] !== tIdx) {
+                const nsi = (rowStart + nx) * 4;
+                const nd = Math.max(
+                  Math.abs(curr[nsi] - canvasRgba[nsi]),
+                  Math.abs(curr[nsi+1] - canvasRgba[nsi+1]),
+                  Math.abs(curr[nsi+2] - canvasRgba[nsi+2]),
+                );
+                if (nd > sparseThreshold) { hasNeighbor = true; break; }
+              }
+            }
+            if (!hasNeighbor) r.indexed[idx] = tIdx;
+          }
+        }
+        // Recompute bbox after suppression
+        minX = width; maxX = -1; minY = height; maxY = -1;
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            if (r.indexed[y * width + x] !== tIdx) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
           }
         }
       }
