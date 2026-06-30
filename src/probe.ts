@@ -21,6 +21,9 @@ export interface ProbeResult {
   /** Distinct colors in sampled frames (6-bit-per-channel quantized). */
   colorComplexity: number;
 
+  /** Fraction of pixels in smooth gradient regions (0–1). */
+  gradientDensity: number;
+
   /** Frame indices where > 60% of pixels change at once. */
   sceneChanges: number[];
 
@@ -102,9 +105,10 @@ export function probeFrames(
   }
   const motionLevel = frames.length > 1 ? totalMotion / (frames.length - 1) : 0;
 
-  // ── Color complexity (sample every 5th frame, 6-bit quantized) ──
+  // ── Color complexity + gradient density (sample every 5th frame) ──
 
   const colorSet = new Set<number>();
+  let gradientPixels = 0, gradientSamples = 0;
   for (let f = 0; f < frames.length; f += 5) {
     const frame = frames[f];
     for (let i = 0; i < numPixels; i++) {
@@ -114,7 +118,27 @@ export function probeFrames(
       const b6 = frame[idx + 2] >> 2;
       colorSet.add((r6 << 12) | (g6 << 6) | b6);
     }
+    // Gradient density: count pixels where all 4 neighbors differ by ≤ 3
+    const gradThresh = 3;
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const ci = (y * width + x) * 4;
+        const cr = frame[ci], cg = frame[ci + 1], cb = frame[ci + 2];
+        let smooth = true;
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+          const ni = ((y + dy) * width + (x + dx)) * 4;
+          if (Math.abs(cr - frame[ni]) > gradThresh ||
+              Math.abs(cg - frame[ni + 1]) > gradThresh ||
+              Math.abs(cb - frame[ni + 2]) > gradThresh) {
+            smooth = false; break;
+          }
+        }
+        if (smooth) gradientPixels++;
+        gradientSamples++;
+      }
+    }
   }
+  const gradientDensity = gradientSamples > 0 ? gradientPixels / gradientSamples : 0;
 
   // ── Scene changes + keyframes ──
   // A keyframe is needed at scene changes (>60% pixels change) and
@@ -136,6 +160,7 @@ export function probeFrames(
     staticFraction,
     motionLevel,
     colorComplexity: colorSet.size,
+    gradientDensity,
     sceneChanges,
     perFrameMotion,
   };

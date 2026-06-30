@@ -483,6 +483,19 @@ async function encodeSubframePipeline(
   let sharedPalette: Uint8Array | null = null;
 
   let adaptiveMaxColors = opts.maxColors;
+  // Content-adaptive maxColors based on gradient density × color complexity.
+  // Low-complexity content (< 1000 colors) already uses few palette entries
+  // regardless of maxColors. Above that, the product of gradient density and
+  // complexity predicts how many palette entries serve smooth transitions:
+  // high values (color-wheel) need 256; most content works at 160-192.
+  if (adaptiveMaxColors >= 256 && !isQuality) {
+    const gdxc = probe.gradientDensity * probe.colorComplexity;
+    if (probe.colorComplexity >= 1000) {
+      if (gdxc > 14000) adaptiveMaxColors = 256;
+      else if (gdxc > 9000) adaptiveMaxColors = 192;
+      else adaptiveMaxColors = 160;
+    }
+  }
   if (isQuality && probe.colorComplexity >= 30000) {
     adaptiveMaxColors = Math.min(adaptiveMaxColors, 224);
   }
@@ -750,13 +763,10 @@ async function encodeSubframePipeline(
             canvasRgba, importanceMap,
             opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
           );
-        // Build remap palette only on the first full-quantize of a segment
-        if (!activePaletteRgba || framesSincePalette >= MAX_FRAMES_PER_PALETTE) {
-          activePaletteRgba = gifBuildPalette(
-            [frames[i].data], width, height,
-            opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
-          );
-        }
+        activePaletteRgba = gifBuildPalette(
+          [frames[i].data], width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+        );
         framesSincePalette = 0;
       }
 
