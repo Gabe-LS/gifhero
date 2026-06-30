@@ -27,14 +27,14 @@ gifhero is smaller than gifski on most content AND higher quality — without an
 
 ### gifhero vs gifski (25 fixtures)
 
-| Resolution | Size wins | VMAF wins | Avg VMAF Δ |
-|-----------|-----------|-----------|------------|
-| **480p** | 16/25 | **21/25** | **+1.8** |
-| **360p** | 16/25 | **22/25** | **+2.1** |
-| **240p** | 17/25 | **22/25** | **+2.4** |
-| **160p** | 18/25 | **21/25** | **+2.5** |
+| Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
+|-----------|-----------|-----------|------------|------------|
+| **480p** | 14/25 | **22/25** | +3% | **+1.4** |
+| **360p** | **17/25** | **19/25** | **-3%** | **+1.1** |
+| **240p** | **19/25** | **18/25** | **-5%** | **+1.2** |
+| **160p** | **22/25** | **17/25** | **-10%** | **+1.3** |
 
-On fixtures where gifski is smaller, gifhero almost always has higher VMAF — a deliberate quality-over-size trade-off from the adaptive stale threshold.
+Smaller files at ≤360p, better VMAF across all resolutions. On fixtures where gifski is smaller, gifhero almost always has higher VMAF.
 
 ## Install
 
