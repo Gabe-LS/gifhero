@@ -786,7 +786,9 @@ async function encodeSubframePipeline(
 
       // Edge-only sparse suppression: suppress isolated near-stale opaque
       // pixels in the outermost 20% of the bbox to shrink it. Interior
-      // pixels are never modified.
+      // pixels are never modified. Track suppressed positions to correct
+      // canvas drift afterward.
+      const suppressed: number[] = [];
       if (maxX >= 0) {
         const bw = maxX - minX + 1, bh = maxY - minY + 1;
         const marginX = Math.max(4, Math.round(bw * 0.2));
@@ -824,7 +826,7 @@ async function encodeSubframePipeline(
                 if (nd > sparseThreshold) { hasNeighbor = true; break; }
               }
             }
-            if (!hasNeighbor) r.indexed[idx] = tIdx;
+            if (!hasNeighbor) { r.indexed[idx] = tIdx; suppressed.push(idx); }
           }
         }
         // Recompute bbox after suppression
