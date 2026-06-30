@@ -793,8 +793,8 @@ async function encodeSubframePipeline(
       const suppressed: number[] = [];
       if (maxX >= 0) {
         const bw = maxX - minX + 1, bh = maxY - minY + 1;
-        const marginX = Math.max(4, Math.round(bw * 0.2));
-        const marginY = Math.max(4, Math.round(bh * 0.2));
+        const marginX = Math.max(4, Math.round(bw * 0.4));
+        const marginY = Math.max(4, Math.round(bh * 0.4));
         const sparseThreshold = staleThreshold + 2;
         const sparseRadius = 6;
 
