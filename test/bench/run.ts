@@ -120,49 +120,49 @@ const ALL_ENCODERS: Record<string, { available: () => boolean; encode: EncoderFn
   },
   "gifski": {
     available: () => hasCommand("gifski"),
-    encode: (framesDir, outputPath, targetWidth) => {
+    encode: async (framesDir, outputPath, targetWidth) => {
       const wFlag = targetWidth ? `--width ${targetWidth} ` : "";
-      execSync(`gifski --fps 20 ${wFlag}-o "${outputPath}" "${framesDir}"/*.png`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" });
+      await execAsync(`gifski --fps 20 ${wFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        { timeout: 120000, shell: "/bin/bash" });
     },
   },
   "ffmpeg": {
     available: () => hasCommand("ffmpeg"),
-    encode: (framesDir, outputPath, targetWidth) => {
+    encode: async (framesDir, outputPath, targetWidth) => {
       const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
-      execSync(
+      await execAsync(
         `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000 });
+        { timeout: 120000 });
     },
   },
   "ffmpeg-hq": {
     available: () => hasCommand("ffmpeg"),
-    encode: (framesDir, outputPath, targetWidth) => {
+    encode: async (framesDir, outputPath, targetWidth) => {
       const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
-      execSync(
+      await execAsync(
         `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=single[p];[s1][p]paletteuse=new=1:dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000 });
+        { timeout: 120000 });
     },
   },
   "magick": {
     available: () => hasCommand("magick"),
-    encode: (framesDir, outputPath, targetWidth) => {
+    encode: async (framesDir, outputPath, targetWidth) => {
       const resize = targetWidth ? `-resize ${targetWidth}x` : "";
-      execSync(
+      await execAsync(
         `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resize} -dither FloydSteinberg -colors 256 -coalesce -layers OptimizePlus -layers OptimizeTransparency "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" });
+        { timeout: 120000, shell: "/bin/bash" });
     },
   },
   "ffmpeg+gifsicle": {
     available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
-    encode: (framesDir, outputPath, targetWidth) => {
+    encode: async (framesDir, outputPath, targetWidth) => {
       const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
       const tmp = outputPath + ".tmp.gif";
-      execSync(
+      await execAsync(
         `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${tmp}"`,
-        { stdio: "ignore", timeout: 120000 });
-      execSync(`gifsicle -O3 --lossy=80 --color-method=median-cut "${tmp}" -o "${outputPath}"`,
-        { stdio: "ignore", timeout: 60000 });
+        { timeout: 120000 });
+      await execAsync(`gifsicle -O3 --lossy=80 --color-method=median-cut "${tmp}" -o "${outputPath}"`,
+        { timeout: 60000 });
       try { rmSync(tmp); } catch {}
     },
   },
@@ -548,10 +548,11 @@ async function main() {
   }
 
   if (PARALLEL_MODE) {
-    // Phase 1: Parallel gifhero encoding via worker threads
+    // Phase 1: Encode everything in parallel — gifhero via workers, external via concurrent processes
     const gifheroEncoders = availableEncoders.filter(n => n.startsWith("gifhero"));
     const externalEncoders = availableEncoders.filter(n => !n.startsWith("gifhero"));
 
+    // 1a. Batch gifhero via worker threads
     if (gifheroEncoders.length > 0) {
       const allJobs: EncodeJob[] = [];
       const jobMeta: Array<{ fixture: string; encoder: string; srcDir: string; outputPath: string;
@@ -583,31 +584,33 @@ async function main() {
         }
       }
 
-      console.log(`  Phase 1: Encoding ${allJobs.length} gifhero jobs in parallel...`);
+      console.log(`  Phase 1a: Encoding ${allJobs.length} gifhero jobs via workers...`);
       const t0 = performance.now();
       const gifs = await encodeParallel(allJobs, 16, (done, total) => {
-        process.stdout.write(`\r    gifhero: ${done}/${total} jobs`);
+        process.stdout.write(`\r    gifhero: ${done}/${total}`);
       });
       console.log(`\n    Done in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
 
       for (let i = 0; i < gifs.length; i++) {
         const m = jobMeta[i];
         writeFileSync(m.outputPath, gifs[i]);
-        const fileSize = gifs[i].byteLength;
-        const hash = bufHash(gifs[i]);
         const r: any = {
           fixture: m.fixture, resolution: `${m.res}p`,
-          encoder: m.encoder, fileSize, hash, encodingTimeMs: 0, frameCount: m.frameCount,
+          encoder: m.encoder, fileSize: gifs[i].byteLength, hash: bufHash(gifs[i]),
+          encodingTimeMs: 0, frameCount: m.frameCount,
           outputWidth: m.outW, outputHeight: m.outH,
         };
-        await collectMetrics(r, m.outputPath, m.srcDir, m.outW, m.outH, m.srcW, m.srcH, m.frameCount);
         results.push(r);
+        metricJobs.push({ r, outputPath: m.outputPath, srcDir: m.srcDir, outW: m.outW, outH: m.outH, srcW: m.srcW, srcH: m.srcH, frameCount: m.frameCount });
       }
     }
 
-    // Phase 2: External encoders sequentially (they spawn their own processes)
+    // 1b. External encoders in parallel (8 concurrent child processes)
     if (externalEncoders.length > 0) {
-      console.log(`  Phase 2: External encoders (${externalEncoders.join(", ")})...\n`);
+      const extJobs: Array<{ fixture: string; encoder: string; srcDir: string; outputPath: string;
+        res: number; resSuffix: string; outW: number; outH: number; srcW: number; srcH: number;
+        frameCount: number; targetWidth: number | undefined }> = [];
+
       for (const fixture of fixtures) {
         const srcDir = join(FIXTURES_DIR, fixture);
         const frameCount = readdirSync(srcDir).filter(f => f.endsWith(".png")).length;
@@ -621,33 +624,53 @@ async function main() {
           const outW = res < srcW ? res : srcW;
           const outH = res < srcW ? Math.round(srcH * outW / srcW) : srcH;
 
-          console.log(`  ${fixture}${resSuffix} (${frameCount} frames, ${outW}x${outH})`);
           for (const encName of externalEncoders) {
-            const outputPath = join(gifsDir, `${fixture}${resSuffix}-${encName}.gif`);
-            const t0 = performance.now();
-            let encResult: EncodeResult | void;
-            try {
-              encResult = await ALL_ENCODERS[encName].encode(srcDir, outputPath, targetWidth);
-            } catch (err) {
-              console.log(`    ✗ ${encName}: FAILED — ${(err as Error).message}`);
-              continue;
-            }
-            const encTime = Math.round(performance.now() - t0);
-            if (!existsSync(outputPath)) { console.log(`    ✗ ${encName}: no output`); continue; }
-            const fileSize = statSync(outputPath).size;
-            const hash = fileHash(outputPath);
-            const r: any = {
-              fixture, resolution: `${res}p`,
-              encoder: encName, fileSize, hash, encodingTimeMs: encTime, frameCount,
-              outputWidth: outW, outputHeight: outH,
-              ...(encResult?.timing ? { timing: encResult.timing } : {}),
-            };
-            await collectMetrics(r, outputPath, srcDir, outW, outH, srcW, srcH, frameCount);
-            results.push(r);
+            extJobs.push({
+              fixture, encoder: encName, srcDir,
+              outputPath: join(gifsDir, `${fixture}${resSuffix}-${encName}.gif`),
+              res, resSuffix, outW, outH, srcW, srcH, frameCount, targetWidth,
+            });
           }
         }
       }
+
+      console.log(`  Phase 1b: Encoding ${extJobs.length} external jobs (${METRIC_CONCURRENCY} parallel)...`);
+      let extDone = 0;
+      for (let i = 0; i < extJobs.length; i += METRIC_CONCURRENCY) {
+        const batch = extJobs.slice(i, i + METRIC_CONCURRENCY);
+        await Promise.all(batch.map(async (job) => {
+          try {
+            await ALL_ENCODERS[job.encoder].encode(job.srcDir, job.outputPath, job.targetWidth);
+          } catch { return; }
+          if (!existsSync(job.outputPath)) return;
+          const fileSize = statSync(job.outputPath).size;
+          const r: any = {
+            fixture: job.fixture, resolution: `${job.res}p`,
+            encoder: job.encoder, fileSize, hash: fileHash(job.outputPath),
+            encodingTimeMs: 0, frameCount: job.frameCount,
+            outputWidth: job.outW, outputHeight: job.outH,
+          };
+          results.push(r);
+          metricJobs.push({ r, outputPath: job.outputPath, srcDir: job.srcDir, outW: job.outW, outH: job.outH, srcW: job.srcW, srcH: job.srcH, frameCount: job.frameCount });
+          extDone++;
+          process.stdout.write(`\r    external: ${extDone}/${extJobs.length}`);
+        }));
+      }
+      console.log("\n");
     }
+
+    // Phase 2: Metrics in parallel
+    console.log(`  Phase 2: Metrics (${metricJobs.length} jobs, ${METRIC_CONCURRENCY} parallel)...\n`);
+    let metricsDone = 0;
+    for (let i = 0; i < metricJobs.length; i += METRIC_CONCURRENCY) {
+      const batch = metricJobs.slice(i, i + METRIC_CONCURRENCY);
+      await Promise.all(batch.map(async (job) => {
+        await collectMetrics(job.r, job.outputPath, job.srcDir, job.outW, job.outH, job.srcW, job.srcH, job.frameCount);
+        metricsDone++;
+        process.stdout.write(`\r    ${metricsDone}/${metricJobs.length}`);
+      }));
+    }
+    console.log("\n");
 
   } else {
     // Default mode: encode sequentially (accurate timing), metrics in parallel
