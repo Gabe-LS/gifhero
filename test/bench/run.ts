@@ -586,7 +586,7 @@ async function main() {
 
       console.log(`  Phase 1a: Encoding ${allJobs.length} gifhero jobs via workers...`);
       const t0 = performance.now();
-      const gifs = await encodeParallel(allJobs, 16, (done, total) => {
+      const gifs = await encodeParallel(allJobs, 8, (done, total) => {
         process.stdout.write(`\r    gifhero: ${done}/${total}`);
       });
       console.log(`\n    Done in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);

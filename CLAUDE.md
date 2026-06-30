@@ -256,9 +256,30 @@ Key options beyond presets:
 ## Commands
 - `npm run build` — build with tsup
 - `npm run test` — run vitest (52 tests)
-- `npm run bench` — full benchmark (25 fixtures × 4 resolutions)
+- `npm run bench` — full benchmark (25 fixtures × 4 resolutions), sequential encoding + parallel metrics
 - `npm run bench:fast` — fast benchmark (6 fixtures, gifhero + gifski only)
-- `npm run bench:parallel` — parallel mode (worker threads for gifhero encoding)
+- `npm run bench:parallel` — parallel mode: all encoding + metrics concurrent, ~5× faster, no timing capture
+
+### Benchmark tool (`test/bench/run.ts`)
+
+Two modes:
+- **Default**: encodes sequentially (accurate per-encoder timing), metrics 8-wide parallel
+- **Parallel** (`--parallel`): gifhero via 8 worker threads, external encoders via 8 concurrent processes, metrics 8-wide — fastest for testing, no timing capture
+
+Output structure: `test/bench/results/{timestamp}/results.json` + `gifs/`, with `latest` symlink.
+
+Key CLI options:
+```
+--fixtures <names>      Comma-separated [default: all 25]
+--resolutions <widths>  Comma-separated [default: 480,360,240,160]
+--encoders <names>      Comma-separated [default: all]
+--metrics <names>       vmaf,ssim,psnr,ciede,cambi,dssim,tfs [default: all]
+--parallel              Full parallelism (no timing)
+--fast                  6 fixtures, gifhero+gifski, skip DSSIM/TFS
+--list                  Show available fixtures and encoders
+```
+
+Visual comparison: `test/bench/viewer.html` (loads `results/latest/results.json`).
 
 ### Building the WASM module
 ```bash

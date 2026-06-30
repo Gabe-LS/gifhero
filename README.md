@@ -163,17 +163,19 @@ CLI (Rust):
 npm run build        # Build TypeScript bundles
 npm run test         # Run vitest (52 tests)
 
-# Benchmark
-npm run bench                  # Full (25 fixtures × 4 resolutions)
-npm run bench:fast             # Fast (6 fixtures)
-npm run bench:parallel         # Parallel encoding
+# Benchmark (two modes)
+npm run bench            # Sequential encoding (accurate timing) + parallel metrics
+npm run bench:fast       # Fast: 6 fixtures, gifhero + gifski only
+npm run bench:parallel   # Full parallelism: ~5× faster, no timing capture
 
+# Custom runs
 npx tsx test/bench/run.ts --list                                    # Show fixtures & encoders
 npx tsx test/bench/run.ts --fixtures bbb-clip-01,talking-head       # Specific fixtures
 npx tsx test/bench/run.ts --encoders gifhero,gifski --metrics vmaf  # Specific config
+npx tsx test/bench/run.ts --parallel --resolutions 480              # Fast parallel, one resolution
 
 # Visual comparison
-open test/bench/viewer.html    # A/B viewer (loads latest results)
+open test/bench/viewer.html    # A/B viewer (loads results/latest/)
 
 # Rust CLI
 cd packages/gifhero-core
