@@ -2,7 +2,7 @@
 
 The highest-compression GIF encoder. Browser SDK + native CLI.
 
-gifhero produces **14% smaller files than gifski** — the previous state of the art — at equal or better perceptual quality, validated across 25 diverse video fixtures at 4 resolutions (800 encodes).
+gifhero produces **smaller files than gifski** on 66% of fixtures with **better VMAF on 84%** — validated across 25 diverse video fixtures at 4 resolutions, without lossy LZW compression.
 
 ## Why gifhero
 
@@ -12,43 +12,29 @@ Every GIF encoder makes you choose between file size and quality. gifhero doesn'
 Size (KB)                     Quality (VMAF)
     ◄── smaller    larger ──►     ◄── worse    better ──►
 
-    gifski-lossy ████░░░░░░░░     gifski-lossy █████████░░░  94.4
-    gifhero-bal  █████░░░░░░░     gifhero-bal  █████████░█░  96.5  ◄── best ratio
-    gifhero-q    ██████░░░░░░     gifhero-q    ██████████░░  96.9
-    gifski       ███████░░░░░     gifski       █████████░░░  96.3
+    gifhero      █████░░░░░░░     gifhero      ██████████░░  96.8
+    gifski       ██████░░░░░░     gifski       █████████░░░  96.1
     ffmpeg+gsc   █████████░░░     ffmpeg+gsc   █████████░█░  97.1
     ffmpeg       ██████████░░     ffmpeg       ██████████░░  97.6
     magick       █████████████    magick       ██████████░░  98.0
 ```
 
-gifhero balanced sits in a unique position: **smaller than gifski, higher quality than gifski-lossy, and competitive VMAF with tools that produce 2× larger files.**
+gifhero is smaller than gifski on most content AND higher quality — without any lossy LZW tricks.
 
 ## Benchmark results
 
-25 fixtures × 4 resolutions × 8 encoders. Full results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+25 fixtures × 4 resolutions. Full results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-### gifhero balanced vs gifski (25 fixtures)
+### gifhero vs gifski (25 fixtures)
 
-| Resolution | Size wins | vs gifski | Avg VMAF Δ |
+| Resolution | Size wins | VMAF wins | Avg VMAF Δ |
 |-----------|-----------|-----------|------------|
-| **480p** | 22/25 | **-14%** | +0.1 |
-| **360p** | 23/25 | **-14%** | +0.3 |
-| **240p** | 24/25 | **-14%** | +1.3 |
-| **160p** | 24/25 | **-14%** | +2.0 |
+| **480p** | 16/25 | **21/25** | **+1.8** |
+| **360p** | 16/25 | **22/25** | **+2.1** |
+| **240p** | 17/25 | **22/25** | **+2.4** |
+| **160p** | 18/25 | **21/25** | **+2.5** |
 
-Zero VMAF losses >2 points. Compression advantage is consistent across all resolutions.
-
-### All encoders (480p)
-
-| Encoder | Total size | Avg VMAF | vs gifhero |
-|---------|-----------|----------|------------|
-| **gifhero balanced** | **55.6 MB** | **96.5** | — |
-| gifhero quality | 59.8 MB | 96.9 | +8% |
-| gifski (q90) | 64.4 MB | 96.3 | +16% |
-| gifski-lossy (q80) | 51.5 MB | 94.4 | -7% |
-| ffmpeg + gifsicle | 84.4 MB | 97.1 | +52% |
-| ffmpeg | 102.0 MB | 97.6 | +83% |
-| ImageMagick | 137.5 MB | 98.0 | +147% |
+On fixtures where gifski is smaller, gifhero almost always has higher VMAF — a deliberate quality-over-size trade-off from the adaptive stale threshold.
 
 ## Install
 
@@ -65,7 +51,6 @@ const gif = await gifhero
   .fromFile(videoFile)
   .fps(20)
   .width(480)
-  .preset("balanced")
   .toGif();
 ```
 
@@ -82,38 +67,31 @@ gifhero input.mp4 -w 480 --fps 20 -o output.gif
 
 # Batch encode (parallel)
 gifhero video1.mp4 video2.mp4 video3.mp4 -w 480 -o outdir/
-
-# Quality preset
-gifhero input.mp4 -w 480 --preset quality -o output.gif
 ```
 
 Requires ffmpeg on PATH for video decoding.
-
-## Presets
-
-| | balanced (default) | quality |
-|---|---|---|
-| **Optimized for** | File size | VMAF |
-| **imagequant quality** | 95 | 98 |
-| **Temporal denoise** | Yes (noise-aware gate) | No |
-| **staleThreshold** | 5 (adaptive, per-frame boost) | 4 (adaptive) |
-| **maxColors** | 192 at high complexity | 224 at high complexity |
-| **vs gifski size** | 14% smaller | 7% smaller |
-| **vs gifski VMAF** | +0.1 | +0.5 |
-
-Both presets share: WASM Lanczos3 downscaling, conditional shared palette, adaptive lossy LZW (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, motion-adjusted staleThreshold.
 
 ## Encode speed
 
 | | Per file (480p, 100 frames) | Notes |
 |---|---|---|
+| gifhero SDK (Node.js) | ~4s | TS + WASM pipeline |
 | gifhero CLI (Rust) | ~0.9s | Parallel Lanczos3 + LZW |
 | gifski CLI | ~0.3s | Parallel quantization |
-| gifhero SDK (Node.js) | ~2.7s | TS + WASM pipeline |
 
-gifski is ~3× faster per file because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking. This is the cost of 14% smaller files.
+gifski is faster because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking (each frame's transparency depends on the previous decoded frame).
 
-Batch throughput: **3.4 files/s** at 4 concurrent files on 16 cores (5.2× vs sequential).
+### Per-stage timing (bbb-clip-01, 100 frames, 480p)
+
+| Stage | Time | % |
+|-------|------|---|
+| quantize | 2.0s | 47% |
+| transparency | 0.6s | 14% |
+| write (LZW + GIF) | 0.3s | 7% |
+| denoise | 0.2s | 5% |
+| probe | 0.1s | 3% |
+
+Batch throughput (Rust CLI): **3.4 files/s** at 4 concurrent files on 16 cores.
 
 ## Browser sources
 
@@ -143,7 +121,6 @@ Options:
   -w, --width <PX>       Target width (height auto)
       --height <PX>      Target height
       --fps <N>          Frames per second [default: 20]
-      --preset <NAME>    quality | balanced [default: balanced]
       --max-duration <S> Maximum duration in seconds
   -j, --threads <N>      Threads per file [default: auto]
   -q, --quiet            Suppress output
@@ -157,13 +134,13 @@ Two-pass pipeline: **probe** then **encode**.
 - Per-pixel min/max tracking → static mask (pixels that never change)
 - Motion level (avg fraction of pixels changing per frame)
 - Color complexity (distinct 6-bit quantized colors)
-- Scene change detection (>60% pixels change) and motion-to-static transitions
+- Scene change detection and motion-to-static transitions
 
 **Pass 2 — Encode** uses probe results to drive every decision:
-1. Temporal denoise (balanced only): 3-frame median filter, triggered only when sub-perceptual noise is detected
+1. Temporal denoise: 3-frame median filter, triggered only when sub-perceptual noise is detected
 2. WASM Lanczos3 downscale (12× faster than pure JS, bit-identical output)
-3. Shared palette via imagequant Histogram (when color complexity > 8K or downscaling)
-4. Per-frame: alpha-zero static + stale pixels → imagequant with `set_background` → bbox crop → palette trim (power-of-2) → lossy LZW with deferred clear
+3. Palette fitness model: build shared palette at keyframes, fast remap on subsequent frames, rebuild when palette fitness degrades
+4. Per-frame: alpha-zero static + stale pixels → imagequant with `set_background` → edge sparse suppression → bbox crop → palette trim (power-of-2) → LZW with deferred clear
 5. GIF89a assembly with local color tables
 
 ## Architecture
@@ -180,19 +157,23 @@ CLI (Rust):
   → Rayon parallel LZW → GIF
 ```
 
-The full pipeline exists in both TypeScript (browser) and Rust (CLI). The Rust port was validated across 200 comparisons (25 fixtures × 4 resolutions × 2 presets): 118 byte-identical, rest within ±5% from imagequant threading nondeterminism, max 0.2 VMAF difference.
-
 ## Development
 
 ```bash
 npm run build        # Build TypeScript bundles
 npm run test         # Run vitest (52 tests)
 
-# Benchmark (configurable)
-npx tsx test/bench/run-sample.ts --list                          # show fixtures & encoders
-npx tsx test/bench/run-sample.ts --fixtures bbb-clip-01,candle-flame --encoders gifhero-balanced,gifski
-npx tsx test/bench/run-sample.ts --resolutions 0,360,240,160     # full multi-resolution
-npx tsx test/bench/run-sample.ts --keep-gifs                     # retain output GIFs
+# Benchmark
+npm run bench                  # Full (25 fixtures × 4 resolutions)
+npm run bench:fast             # Fast (6 fixtures)
+npm run bench:parallel         # Parallel encoding
+
+npx tsx test/bench/run.ts --list                                    # Show fixtures & encoders
+npx tsx test/bench/run.ts --fixtures bbb-clip-01,talking-head       # Specific fixtures
+npx tsx test/bench/run.ts --encoders gifhero,gifski --metrics vmaf  # Specific config
+
+# Visual comparison
+open test/bench/viewer.html    # A/B viewer (loads latest results)
 
 # Rust CLI
 cd packages/gifhero-core
@@ -202,7 +183,7 @@ cargo test
 
 ## Benchmark methodology
 
-25 fixtures (animation, screencasts, webcam, sports, gradients, pixel art) × 4 resolutions × 8 encoders. Quality measured via VMAF, SSIM, DSSIM, PSNR, CIEDE2000, and CAMBI. Full methodology, per-fixture tables, and structural analysis in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+25 fixtures (animation, screencasts, webcam, sports, gradients, pixel art) × 4 resolutions. gifhero vs gifski at default settings, no lossy LZW. Quality measured via VMAF. Each run produces a timestamped directory with GIFs and JSON results. Full methodology and per-fixture tables in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## License
 
