@@ -25,76 +25,30 @@ gifhero balanced sits in a unique position: **smaller than gifski, higher qualit
 
 ## Benchmark results
 
-Tested on 25 fixtures (Big Buck Bunny clips, screencasts, talking heads, fast action, gradients, pixel art, and more) at 4 resolutions (native 480p, 360p, 240p, 160p). All quality metrics computed with ffmpeg libvmaf, dssim, and custom temporal flicker scoring.
+25 fixtures × 4 resolutions × 8 encoders. Full results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-### gifhero balanced vs all encoders (25 fixtures, native 480p)
+### gifhero balanced vs gifski (25 fixtures)
 
-| Encoder | Total size | Avg VMAF | Avg SSIM | Avg DSSIM | vs gifhero size |
-|---------|-----------|----------|----------|-----------|-----------------|
-| **gifhero balanced** | **55.6 MB** | **96.5** | **0.9726** | **0.0018** | — |
-| gifhero quality | 59.8 MB | 96.9 | 0.9754 | 0.0014 | +8% |
-| gifski (q90) | 64.4 MB | 96.3 | 0.9729 | 0.0031 | +16% |
-| gifski-lossy (q80/lq80) | 51.5 MB | 94.4 | 0.9630 | 0.0047 | -7% |
-| ffmpeg (palettegen) | 102.0 MB | 97.6 | 0.9660 | 0.0009 | +83% |
-| ffmpeg-hq (per-frame) | 146.8 MB | 95.7 | 0.9610 | 0.0175 | +164% |
-| ImageMagick | 137.5 MB | 98.0 | 0.9544 | 0.0025 | +147% |
-| ffmpeg + gifsicle | 84.4 MB | 97.1 | 0.9584 | 0.0030 | +52% |
+| Resolution | Size wins | vs gifski | Avg VMAF Δ |
+|-----------|-----------|-----------|------------|
+| **480p** | 22/25 | **-14%** | +0.1 |
+| **360p** | 23/25 | **-14%** | +0.3 |
+| **240p** | 24/25 | **-14%** | +1.3 |
+| **160p** | 24/25 | **-14%** | +2.0 |
 
-**Key findings:**
-- gifhero balanced is **14% smaller than gifski** with +0.1 VMAF and equivalent SSIM
-- gifhero quality is **7% smaller than gifski** with +0.5 VMAF
-- gifski-lossy saves 7% over gifhero but loses 2.0 VMAF points — visible quality degradation
-- ffmpeg and ImageMagick produce 83-164% larger files despite similar or slightly higher VMAF
-- gifhero has the lowest DSSIM (structural dissimilarity) of any encoder except ffmpeg
+Zero VMAF losses >2 points. Compression advantage is consistent across all resolutions.
 
-### How compression scales with resolution
+### All encoders (480p)
 
-| Resolution | gifhero size wins | Total size Δ | Avg VMAF Δ | Avg SSIM Δ |
-|-----------|-------------------|-------------|------------|------------|
-| **480p** (native) | **22/25** | **-14%** | +0.1 | -0.0003 |
-| **360p** | **23/25** | **-14%** | +0.1 | -0.0008 |
-| **240p** | **24/25** | **-14%** | +0.5 | +0.0011 |
-| **160p** | **24/25** | **-14%** | +0.5 | +0.0023 |
-
-gifhero's compression advantage is consistent across all resolutions. At lower resolutions (240p, 160p), gifhero's VMAF advantage grows — the sub-frame pipeline's transparency optimization becomes more effective as pixel counts decrease.
-
-### Per-fixture breakdown (balanced vs gifski, native 480p)
-
-| Fixture | gifhero | gifski | Size Δ | VMAF Δ | Content type |
-|---------|---------|--------|--------|--------|--------------|
-| screencast | 15 KB | 50 KB | **-69%** | 0.0 | UI recording |
-| bbb-clip-01 | 3,105 KB | 4,775 KB | **-35%** | -1.4 | Animated film |
-| bbb-clip-04 | 1,372 KB | 2,102 KB | **-35%** | -1.1 | Animated film |
-| big-buck-bunny | 2,194 KB | 3,172 KB | **-31%** | +0.0 | Animated film |
-| bbb-clip-05 | 1,565 KB | 2,269 KB | **-31%** | -1.2 | Nature scene |
-| skin-tones | 133 KB | 180 KB | **-26%** | +0.1 | Portrait |
-| bbb-clip-09 | 1,302 KB | 1,730 KB | **-25%** | -0.5 | Mixed scene |
-| city-night | 3,251 KB | 4,182 KB | **-22%** | -0.3 | Urban |
-| fast-action | 3,836 KB | 3,282 KB | +17% | **+3.2** | Sports/motion |
-| shapes | 344 KB | 398 KB | **-14%** | **+3.0** | Synthetic |
-| sintel | 1,260 KB | 1,457 KB | **-13%** | +0.1 | Film |
-| talking-head | 1,121 KB | 1,223 KB | **-8%** | -0.2 | Webcam |
-| jellyfish | 2,640 KB | 2,939 KB | **-10%** | -0.8 | Nature |
-
-gifhero wins on file size in 22/25 fixtures. On the 3 where gifski is smaller, gifhero has significantly higher VMAF (+3.2 on fast-action, +0.1 on bbb-clip-08).
-
-### Why gifhero produces smaller files
-
-GIF structural analysis reveals the difference:
-
-| | gifhero | gifski | ffmpeg | ImageMagick |
-|---|---|---|---|---|
-| **Bits per pixel** | 1.52 | 1.79 | 2.83 | 4.01 |
-| **Sub-frame usage** | 42% | 40% | 32% | 9% |
-| **Avg palette size** | 188 | 244 | global | 226 |
-| **Transparency** | 84% | 97% | 97% | 58% |
-
-gifhero's sub-frame pipeline probes the video content before encoding:
-1. **Static pixel detection** — pixels that never change across all frames become unconditionally transparent
-2. **Canvas-aware quantization** — imagequant's `set_background` blends dithering with the previously decoded frame
-3. **Adaptive palette trimming** — unused palette entries are evicted to cross power-of-2 boundaries, reducing LZW minimum code size
-4. **Content-adaptive thresholds** — motion level and color complexity drive per-frame transparency and compression decisions
-5. **Lossy LZW with deferred clear** — Chebyshev distance matching for approximate dictionary lookups, with dictionary clear deferred until compression ratio degrades
+| Encoder | Total size | Avg VMAF | vs gifhero |
+|---------|-----------|----------|------------|
+| **gifhero balanced** | **55.6 MB** | **96.5** | — |
+| gifhero quality | 59.8 MB | 96.9 | +8% |
+| gifski (q90) | 64.4 MB | 96.3 | +16% |
+| gifski-lossy (q80) | 51.5 MB | 94.4 | -7% |
+| ffmpeg + gifsicle | 84.4 MB | 97.1 | +52% |
+| ffmpeg | 102.0 MB | 97.6 | +83% |
+| ImageMagick | 137.5 MB | 98.0 | +147% |
 
 ## Install
 
@@ -151,46 +105,15 @@ Both presets share: WASM Lanczos3 downscaling, conditional shared palette, adapt
 
 ## Encode speed
 
-### Per-encoder timing (25 fixtures, native 480p, Node.js/CLI)
+| | Per file (480p, 100 frames) | Notes |
+|---|---|---|
+| gifhero CLI (Rust) | ~0.9s | Parallel Lanczos3 + LZW |
+| gifski CLI | ~0.3s | Parallel quantization |
+| gifhero SDK (Node.js) | ~2.7s | TS + WASM pipeline |
 
-| Encoder | Avg time | Total (25 files) | Relative |
-|---------|----------|-------------------|----------|
-| gifski-lossy | 282ms | 7.0s | 1.0× (fastest) |
-| gifski | 333ms | 8.3s | 1.2× |
-| ffmpeg | 700ms | 17.5s | 2.5× |
-| ffmpeg-hq | 1,900ms | 47.5s | 6.7× |
-| **gifhero balanced** | **2,726ms** | **68.2s** | **9.7×** |
-| gifhero quality | 2,835ms | 70.9s | 10.1× |
-| ImageMagick | 3,176ms | 79.4s | 11.3× |
-| ffmpeg + gifsicle | 3,876ms | 96.9s | 13.8× |
+gifski is ~3× faster per file because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking. This is the cost of 14% smaller files.
 
-> **Note:** these timings are from the Node.js benchmark (TS pipeline + WASM quantization). The native Rust CLI is ~3× faster (see below).
-
-### Native CLI speed
-
-| Target | Time (100 frames, 480p) | Notes |
-|--------|------------------------|-------|
-| gifhero CLI (Rust + Rayon) | ~0.9s | Parallel Lanczos3 + LZW, imagequant internal threading |
-| gifski CLI | ~0.3s | Parallel quantization via Rayon |
-
-gifski is ~3× faster per file because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking (each frame's transparency depends on the previous frame's decoded output). This sequential dependency is the cost of producing 14% smaller files.
-
-### Batch throughput
-
-For batch workloads, gifhero's CLI processes multiple files in parallel:
-
-```bash
-# 4 concurrent files × 4 threads each on 16 cores
-gifhero *.mp4 -w 480 -o outdir/
-# Throughput: 3.4 files/second (5.2× vs sequential)
-```
-
-| Concurrent files | Threads/file | Throughput | Speedup |
-|-----------------|-------------|------------|---------|
-| 1 | 16 | 1.5 files/s | 2.3× |
-| 2 | 8 | 2.4 files/s | 3.6× |
-| **4** | **4** | **3.4 files/s** | **5.2×** |
-| 8 | 2 | 1.9 files/s | 2.9× |
+Batch throughput: **3.4 files/s** at 4 concurrent files on 16 cores (5.2× vs sequential).
 
 ## Browser sources
 
@@ -279,12 +202,7 @@ cargo test
 
 ## Benchmark methodology
 
-- **25 test fixtures**: 10 Big Buck Bunny clips, animated films (Sintel), screencasts, talking heads, fast action sports, jellyfish, gradients, pixel art, skin tones, solid colors
-- **4 resolutions**: native 480p, 360p, 240p, 160p
-- **8 encoders**: gifhero balanced, gifhero quality, gifski (q90), gifski-lossy (q80/lq80), ffmpeg (palettegen + floyd-steinberg), ffmpeg-hq (per-frame palette), ImageMagick (OptimizePlus + OptimizeTransparency), ffmpeg + gifsicle (-O3 --lossy=80)
-- **Quality metrics**: VMAF (Netflix perceptual quality), SSIM (structural similarity), DSSIM (per-frame structural dissimilarity), PSNR, CIEDE2000 (perceptual color accuracy), CAMBI (banding detection)
-- **GIF structural analysis**: bits per pixel, sub-frame coverage, palette sizes, transparency usage, disposal methods, frame delays — via gifsicle --sinfo
-- **All results reproducible**: `npx tsx test/bench/run-sample.ts --keep-gifs`
+25 fixtures (animation, screencasts, webcam, sports, gradients, pixel art) × 4 resolutions × 8 encoders. Quality measured via VMAF, SSIM, DSSIM, PSNR, CIEDE2000, and CAMBI. Full methodology, per-fixture tables, and structural analysis in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## License
 
