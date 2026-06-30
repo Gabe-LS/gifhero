@@ -30,7 +30,7 @@
     padding: 5px 8px; border-radius: 4px; font-family: inherit; font-size: 12px;
     min-width: 160px; cursor: pointer;
   }
-  select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  select:focus { outline: none; border-color: var(--border); }
   .toolbar-spacer { flex: 1; }
   .toolbar-hint { color: var(--text-dim); font-size: 11px; }
   .btn {
@@ -58,17 +58,13 @@
   #panelL .panel-header { border-radius: 6px 0 0 0; border-right: none; }
   #panelR .panel-header { border-radius: 0 6px 0 0; border-left: none; }
   .panel-header .encoder-name { font-weight: 600; font-size: 12px; }
-  .panel-header .metrics { font-size: 11px; color: var(--text-dim); display: flex; gap: 12px; }
-  .metric-val { color: var(--text); }
-  .metric-winner { color: var(--good); font-weight: 600; }
-  .metric-loser { color: var(--bad); }
 
   .viewport {
     overflow: hidden; position: relative; background: #111;
     border: 1px solid var(--border);
   }
-  #panelL .viewport { border-right: none; border-radius: 0 0 0 6px; }
-  #panelR .viewport { border-left: none; border-radius: 0 0 6px 0; }
+  #panelL .viewport { border-right: none; }
+  #panelR .viewport { border-left: none; }
   .viewport.loupe-active { cursor: grab; touch-action: none; }
   .viewport.loupe-active.dragging { cursor: grabbing; }
   .viewport canvas { display: block; transform-origin: 0 0; pointer-events: none; }
@@ -85,88 +81,86 @@
   }
   .viewport.paused .frame-badge { display: block; }
 
-  .delta-badge {
-    background: rgba(0,0,0,0.8); border: 1px solid var(--border); border-top: none;
-    padding: 5px 14px; font-size: 11px; color: var(--text-dim);
-    white-space: nowrap; text-align: center;
+  .metrics-table {
+    background: var(--surface); border: 1px solid var(--border); border-top: none;
+    font-size: 11px; color: var(--text-dim);
+    border-collapse: collapse; width: 100%;
   }
-  #panelL .delta-badge { border-radius: 0 0 0 6px; border-right: none; }
-  #panelR .delta-badge { border-radius: 0 0 6px 0; border-left: none; }
-  .delta-badge .delta { font-weight: 600; }
-  .delta-good { color: var(--good); }
-  .delta-bad { color: var(--bad); }
-  .delta-neutral { color: var(--text); }
+  #panelL .metrics-table { border-right: none; border-radius: 0 0 0 6px; }
+  #panelR .metrics-table { border-left: none; border-radius: 0 0 6px 0; }
+  .metrics-table td {
+    padding: 3px 10px; text-align: center;
+    border-top: 1px solid var(--border);
+    width: 33.33%;
+  }
+  .metrics-table tr:first-child td { border-top: none; }
+  .metrics-table td:not(:last-child) { border-right: 1px solid var(--border); }
+  .m-label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .m-val { color: var(--text); font-weight: 600; }
+  .m-delta { font-size: 10px; font-weight: 400; }
+  .m-good { color: var(--good); }
+  .m-bad { color: var(--bad); }
+  .m-tip { position: relative; }
+  .m-tip .m-tiptext {
+    display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    background: #000; color: var(--text); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 4px; font-size: 10px;
+    z-index: 20; pointer-events: none; margin-bottom: 4px;
+  }
+  .m-tip:hover .m-tiptext { display: block; }
+  .m-tiptext table { border-collapse: collapse; }
+  .m-tiptext td { padding: 1px 4px; white-space: nowrap; }
+  .m-tiptext td:first-child { text-align: left; padding-right: 12px; color: var(--text-dim); }
+  .m-tiptext td:last-child { text-align: right; }
+
+  .loading-overlay {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; color: var(--text-dim); font-size: 14px;
+  }
 </style>
 </head>
 <body>
 
+<div class="loading-overlay" id="loadingOverlay">Loading results&hellip;</div>
+
 <div class="toolbar">
   <div class="toolbar-group"><label>Fixture</label><select id="fixture"></select></div>
-  <div class="toolbar-group"><label>Resolution</label>
-    <select id="resolution">
-      <option value="">480p (native)</option>
-      <option value="360p">360p</option>
-      <option value="240p">240p</option>
-      <option value="160p">160p</option>
-    </select>
-  </div>
+  <div class="toolbar-group"><label>Resolution</label><select id="resolution"></select></div>
   <div class="toolbar-group"><label>Left</label><div class="encoder-group"><select id="encoderL"></select><button class="lock-btn" id="lockL" title="Lock left encoder">&#x1F513;</button></div></div>
   <div class="toolbar-group"><label>Right</label><div class="encoder-group"><select id="encoderR"></select><button class="lock-btn" id="lockR" title="Lock right encoder">&#x1F513;</button></div></div>
   <div class="toolbar-spacer"></div>
   <div class="toolbar-group"><label>Load JSON</label><input type="file" id="jsonLoad" accept=".json" style="width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;"></div>
   <button class="btn" id="loupeBtn">Loupe 200%</button>
-  <span class="toolbar-hint">Space pause &middot; &larr;&rarr; frame &middot; &uarr;&darr; fixtures &middot; L loupe</span>
+  <span class="toolbar-hint">Space pause &middot; &larr;&rarr; frame &middot; &uarr;&darr; encoders &middot; L loupe</span>
 </div>
 
 <div class="stage">
   <div class="panel" id="panelL">
-    <div class="panel-header">
-      <span class="encoder-name" id="nameL">&mdash;</span>
-      <div class="metrics" id="metricsL"></div>
-    </div>
+    <div class="panel-header"><span class="encoder-name" id="nameL">&mdash;</span></div>
     <div class="viewport" id="vpL">
       <div class="status" id="statusL">select a fixture</div>
       <canvas id="cvL"></canvas>
       <div class="frame-badge" id="badgeL"></div>
     </div>
-    <div class="delta-badge" id="deltaL" style="display:none"></div>
+    <table class="metrics-table" id="metricsL"><tr><td colspan="3">&nbsp;</td></tr></table>
   </div>
   <div class="panel" id="panelR">
-    <div class="panel-header">
-      <span class="encoder-name" id="nameR">&mdash;</span>
-      <div class="metrics" id="metricsR"></div>
-    </div>
+    <div class="panel-header"><span class="encoder-name" id="nameR">&mdash;</span></div>
     <div class="viewport" id="vpR">
       <div class="status" id="statusR">select a fixture</div>
       <canvas id="cvR"></canvas>
       <div class="frame-badge" id="badgeR"></div>
     </div>
-    <div class="delta-badge" id="deltaR" style="display:none"></div>
+    <table class="metrics-table" id="metricsR"><tr><td colspan="3">&nbsp;</td></tr></table>
   </div>
 </div>
 
 <script>
-const FIXTURES = [
-  'bbb-clip-01','bbb-clip-02','bbb-clip-03','bbb-clip-04','bbb-clip-05',
-  'bbb-clip-06','bbb-clip-07','bbb-clip-08','bbb-clip-09','bbb-clip-10',
-  'big-buck-bunny','black-and-white','candle-flame','city-night','color-wheel',
-  'fast-action','jellyfish','pixel-art','screen-recording','screencast',
-  'shapes','sintel','skin-tones','talking-head','two-frame'
-];
-const ENCODERS = [
-  'gifhero-balanced','gifski',
-  'test-bal-local',
-  'test-bal-local-w002','test-bal-local-w004','test-bal-local-w008',
-  'test-bal-local-w01','test-bal-local-w02',
-  'test-bal-local-weber',
-  'test-bal-shared','test-bal-shared-weber',
-  'gifhero-quality','gifski-lossy',
-  'ffmpeg','ffmpeg-hq','ffmpeg+gifsicle','magick',
-];
-const BASE_URL = (() => {
+let BASE_URL = (() => {
   const p = new URLSearchParams(location.search);
   if (p.has('base')) return p.get('base').replace(/\/$/,'');
-  return (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'results/gifs' : 'gifs';
+  return 'results/latest/gifs';
 })();
 
 class GifPlayer {
@@ -177,17 +171,15 @@ class GifPlayer {
     this.bitmaps = [];
     this.delays = [];
     this.fi = 0;
-    this.playing = false;
-    this.rafId = null;
-    this.elapsed = 0;
-    this.lastT = 0;
     this.w = 0;
     this.h = 0;
   }
 
   async load(url) {
     this.stop();
-    const buf = await (await fetch(url)).arrayBuffer();
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`${resp.status}`);
+    const buf = await resp.arrayBuffer();
     const gif = gifuctJs.parseGIF(buf);
     const raw = gifuctJs.decompressFrames(gif, true);
     if (!raw.length) throw new Error('no frames');
@@ -199,7 +191,6 @@ class GifPlayer {
     this.bitmaps = [];
     this.delays = [];
     this.fi = 0;
-    this.elapsed = 0;
 
     const comp = new OffscreenCanvas(this.w, this.h);
     const compCtx = comp.getContext('2d');
@@ -209,16 +200,13 @@ class GifPlayer {
     for (let i = 0; i < raw.length; i++) {
       const f = raw[i];
       if (i === 0) compCtx.clearRect(0, 0, this.w, this.h);
-
       patchCtx.clearRect(0, 0, this.w, this.h);
       patchCtx.putImageData(
         new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height), 0, 0);
       compCtx.drawImage(patch, 0, 0, f.dims.width, f.dims.height,
                         f.dims.left, f.dims.top, f.dims.width, f.dims.height);
-
       this.bitmaps.push(await createImageBitmap(comp));
       this.delays.push(f.delay || 100);
-
       if (f.disposalType === 2)
         compCtx.clearRect(f.dims.left, f.dims.top, f.dims.width, f.dims.height);
       else if (f.disposalType === 3 && i > 0) {
@@ -226,7 +214,6 @@ class GifPlayer {
         compCtx.drawImage(this.bitmaps[i - 1], 0, 0);
       }
     }
-
     this.show(0);
   }
 
@@ -236,286 +223,240 @@ class GifPlayer {
     this.badge.textContent = `${i + 1}/${this.bitmaps.length}`;
   }
 
-  play() {
-    if (this.playing || !this.bitmaps.length) return;
-    this.playing = true;
-    this.lastT = performance.now();
-    this._tick();
-  }
-
-  _tick() {
-    if (!this.playing) return;
-    const now = performance.now();
-    this.elapsed += now - this.lastT;
-    this.lastT = now;
-    const delay = this.delays[this.fi];
-    if (this.elapsed >= delay) {
-      this.elapsed -= delay;
-      this.show((this.fi + 1) % this.bitmaps.length);
-    }
-    this.rafId = requestAnimationFrame(() => this._tick());
-  }
-
-  pause() {
-    this.playing = false;
-    if (this.rafId) { cancelAnimationFrame(this.rafId); this.rafId = null; }
-  }
-
   stop() {
-    this.pause();
     this.bitmaps.forEach(b => b.close());
     this.bitmaps = [];
     this.delays = [];
   }
-
-  toggle() { this.playing ? this.pause() : this.play(); }
-
-  step(d) {
-    if (!this.bitmaps.length) return;
-    this.pause();
-    let n = this.fi + d;
-    if (n < 0) n = this.bitmaps.length - 1;
-    if (n >= this.bitmaps.length) n = 0;
-    this.elapsed = 0;
-    this.show(n);
-  }
 }
 
-// --- UI ---
+// --- UI refs ---
 const $fix = document.getElementById('fixture');
 const $res = document.getElementById('resolution');
 const $encL = document.getElementById('encoderL');
 const $encR = document.getElementById('encoderR');
-FIXTURES.forEach(f => $fix.appendChild(new Option(f, f)));
-ENCODERS.forEach(e => { $encL.appendChild(new Option(e,e)); $encR.appendChild(new Option(e,e)); });
-$encL.value = 'test-bal-local-weber'; $encR.value = 'gifski';
-
 const pL = new GifPlayer(document.getElementById('cvL'), document.getElementById('badgeL'));
 const pR = new GifPlayer(document.getElementById('cvR'), document.getElementById('badgeR'));
 
-// Shared playback loop — single rAF, time-based sync
-let sharedPlaying = false;
-let sharedRafId = null;
-let sharedTime = 0;   // elapsed ms in the animation timeline
-let sharedLastT = 0;
+// --- Shared playback ---
+let sharedPlaying = false, sharedRafId = null, sharedTime = 0, sharedLastT = 0;
 
-function totalDuration(player) {
-  return player.delays.reduce((s, d) => s + d, 0) || 1;
-}
-
-function frameAtTime(player, t) {
-  const total = totalDuration(player);
-  const looped = t % total;
+function totalDuration(p) { return p.delays.reduce((s, d) => s + d, 0) || 1; }
+function frameAtTime(p, t) {
+  const looped = t % totalDuration(p);
   let acc = 0;
-  for (let i = 0; i < player.delays.length; i++) {
-    acc += player.delays[i];
-    if (looped < acc) return i;
-  }
-  return player.delays.length - 1;
+  for (let i = 0; i < p.delays.length; i++) { acc += p.delays[i]; if (looped < acc) return i; }
+  return p.delays.length - 1;
 }
-
 function sharedPlay() {
   if (sharedPlaying) return;
-  sharedPlaying = true;
-  sharedLastT = performance.now();
-  sharedTick();
+  sharedPlaying = true; sharedLastT = performance.now(); sharedTick();
 }
-
 function sharedPause() {
   sharedPlaying = false;
   if (sharedRafId) { cancelAnimationFrame(sharedRafId); sharedRafId = null; }
 }
-
 function sharedTick() {
   if (!sharedPlaying) return;
   const now = performance.now();
-  sharedTime += now - sharedLastT;
-  sharedLastT = now;
+  sharedTime += now - sharedLastT; sharedLastT = now;
   if (pL.bitmaps.length) pL.show(frameAtTime(pL, sharedTime));
   if (pR.bitmaps.length) pR.show(frameAtTime(pR, sharedTime));
   sharedRafId = requestAnimationFrame(sharedTick);
 }
 
-// --- Metrics ---
+// --- Metrics data ---
 let md = null;
-async function loadMetrics() {
-  const files = ['results/bench-2026-06-26-0144.json','results/latest.json','latest.json'];
-  for (const p of files) {
-    try { const r = await fetch(p); if (r.ok) { md = await r.json(); break; } } catch {}
-  }
-  // Load extra results: from URL param or default posterization test
-  const extraFiles = new URLSearchParams(location.search).get('results');
-  const toLoad = extraFiles ? extraFiles.split(',') : ['results/posterization-test.json'];
-  for (const path of toLoad) {
-    try {
-      const r = await fetch(path);
-      if (r.ok) {
-        const extra = await r.json();
-        if (md) { md.results = md.results.concat(extra.results); }
-        else { md = extra; }
-        // Add new encoders/fixtures to dropdowns
-        const existEnc = new Set([...$encL.options].map(o => o.value));
-        const existFix = new Set([...$fix.options].map(o => o.value));
-        [...new Set(extra.results.map(r => r.encoder))].forEach(e => {
-          if (!existEnc.has(e)) { $encL.appendChild(new Option(e, e)); $encR.appendChild(new Option(e, e)); }
-        });
-        [...new Set(extra.results.map(r => r.fixture))].forEach(f => {
-          if (!existFix.has(f)) $fix.appendChild(new Option(f, f));
-        });
-      }
-    } catch {}
+const metricsMap = new Map();
+
+function buildIndex() {
+  metricsMap.clear();
+  if (!md) return;
+  for (const r of md.results) {
+    metricsMap.set(`${r.fixture}|${r.resolution}|${r.encoder}`, r);
   }
 }
-function findM(f,r,e) { if(!md)return null; return md.results.find(x=>x.fixture===f&&x.encoder===(r?`${e}-${r}`:e))||null; }
-function fmtSz(b) { return b<1024?b+' B':b<1048576?(b/1024).toFixed(0)+' KB':(b/1048576).toFixed(1)+' MB'; }
+
+function gifUrl(fixture, resolution, encoder) {
+  return `${BASE_URL}/${fixture}-${resolution}-${encoder}.gif`;
+}
+
+function findM(fixture, resolution, encoder) {
+  return metricsMap.get(`${fixture}|${resolution}|${encoder}`) || null;
+}
+
+// --- Formatting ---
+function fmtSz(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(0) + ' KB' : (b/1048576).toFixed(1) + ' MB'; }
+function fmtTime(ms) { return ms < 1000 ? ms + 'ms' : (ms/1000).toFixed(1) + 's'; }
+
+function pctDelta(v, ov, lowerBetter) {
+  if (v == null || ov == null || ov === 0) return '';
+  const p = ((v - ov) / ov) * 100;
+  if (Math.abs(p) < 0.5) return '';
+  const cls = (lowerBetter ? p < 0 : p > 0) ? 'm-good' : 'm-bad';
+  return ` <span class="m-delta ${cls}">(${p > 0 ? '+' : ''}${p.toFixed(0)}%)</span>`;
+}
+
+function absDelta(v, ov, lowerBetter) {
+  if (v == null || ov == null) return '';
+  const d = v - ov;
+  if (Math.abs(d) < 0.001) return '';
+  const cls = (lowerBetter ? d < 0 : d > 0) ? 'm-good' : 'm-bad';
+  const fmt = Math.abs(d) < 0.1 ? d.toFixed(4) : d.toFixed(1);
+  return ` <span class="m-delta ${cls}">(${d > 0 ? '+' : ''}${fmt})</span>`;
+}
 
 function renderMetrics(id, d, o) {
   const el = document.getElementById(id);
-  if (!d) { el.innerHTML=''; return; }
-  el.innerHTML = [
-    ['Size',fmtSz(d.fileSize),d.fileSize,o?.fileSize,true],
-    ['VMAF',d.vmafMean?.toFixed(1),d.vmafMean,o?.vmafMean,false],
-    ['DSSIM',d.dssimMean?.toFixed(4),d.dssimMean,o?.dssimMean,true],
-  ].map(([l,t,v,ov,lo])=>{
-    if(v==null) return '';
-    let c='metric-val';
-    if(ov!=null&&v!==ov) c=(lo?v<ov:v>ov)?'metric-winner':'metric-loser';
-    return `<span>${l}: <span class="${c}">${t}</span></span>`;
-  }).join('');
+  if (!d) { el.innerHTML = '<tr><td colspan="3">&nbsp;</td></tr>'; return; }
+
+  function cell(label, value, delta, tip) {
+    if (tip) {
+      return `<td class="m-tip"><span class="m-label">${label}</span><br><span class="m-val">${value}</span>${delta || ''}<span class="m-tiptext">${tip}</span></td>`;
+    }
+    return `<td><span class="m-label">${label}</span><br><span class="m-val">${value}</span>${delta || ''}</td>`;
+  }
+
+  const fps = d.gif?.effectiveFps;
+  const frames = d.frameCount || d.gif?.frameCount;
+
+  let timeTooltip = '';
+  if (d.timing) {
+    const rows = ['downscale','denoise','probe','palette','transparency','quantize','subframe','write']
+      .filter(k => d.timing[k] != null)
+      .map(k => `<tr><td>${k}</td><td>${fmtTime(d.timing[k])}</td></tr>`)
+      .join('');
+    if (rows) timeTooltip = `<table>${rows}</table>`;
+  }
+
+  el.innerHTML =
+    '<tr>' +
+      cell('Size', fmtSz(d.fileSize), pctDelta(d.fileSize, o?.fileSize, true)) +
+      cell('VMAF', d.vmafMean != null ? d.vmafMean.toFixed(1) : '—', absDelta(d.vmafMean, o?.vmafMean, false)) +
+      cell('DSSIM', d.dssimMean != null ? d.dssimMean.toFixed(4) : '—', absDelta(d.dssimMean, o?.dssimMean, true)) +
+    '</tr><tr>' +
+      cell('Time', d.encodingTimeMs != null ? fmtTime(d.encodingTimeMs) : '—', pctDelta(d.encodingTimeMs, o?.encodingTimeMs, true), timeTooltip) +
+      cell('FPS', fps != null ? fps : '—', '') +
+      cell('Frames', frames != null ? frames : '—', '') +
+    '</tr>';
 }
 
-function renderDeltas(dL,dR) {
-  const bL=document.getElementById('deltaL'), bR=document.getElementById('deltaR');
-  if(!dL?.fileSize||!dR?.fileSize) { bL.style.display='none'; bR.style.display='none'; return; }
-  function mk(a,b) {
-    const p=(a.fileSize-b.fileSize)/b.fileSize*100;
-    const sc=p<-1?'delta-good':p>1?'delta-bad':'delta-neutral';
-    let h=`<span class="delta ${sc}">${p>0?'+':''}${p.toFixed(0)}%</span> size`;
-    if(a.vmafMean!=null&&b.vmafMean!=null) {
-      const v=a.vmafMean-b.vmafMean;
-      const vc=v>0.1?'delta-good':v<-0.1?'delta-bad':'delta-neutral';
-      h+=`&ensp;<span class="delta ${vc}">${v>0?'+':''}${v.toFixed(1)}</span> VMAF`;
-    }
-    return h;
-  }
-  bL.innerHTML=mk(dL,dR); bL.style.display='';
-  bR.innerHTML=mk(dR,dL); bR.style.display='';
+// --- Populate dropdowns ---
+function populateDropdowns() {
+  if (!md || !md.results.length) return;
+
+  const fixtures = [...new Set(md.results.map(r => r.fixture))].sort();
+  const encoders = [...new Set(md.results.map(r => r.encoder))].sort();
+  const resolutions = [...new Set(md.results.map(r => r.resolution))].sort((a, b) => parseInt(b) - parseInt(a));
+
+  $fix.innerHTML = '';
+  fixtures.forEach(f => $fix.appendChild(new Option(f, f)));
+
+  $res.innerHTML = '';
+  resolutions.forEach(r => $res.appendChild(new Option(r, r)));
+
+  $encL.innerHTML = '';
+  $encR.innerHTML = '';
+  encoders.forEach(e => {
+    $encL.appendChild(new Option(e, e));
+    $encR.appendChild(new Option(e, e));
+  });
+
+  if (encoders.includes('gifhero')) $encL.value = 'gifhero';
+  if (encoders.includes('gifski')) $encR.value = 'gifski';
+  else if (encoders.length > 1) $encR.value = encoders.find(e => e !== $encL.value) || encoders[0];
 }
 
 // --- Sizing ---
 function sizeVp() {
-  if (!pL.w) return;
-  const tH=document.querySelector('.toolbar').offsetHeight;
-  const hH=document.querySelector('.panel-header').offsetHeight;
-  const aH=window.innerHeight-tH-hH-52, aW=(window.innerWidth/2)-32;
-  const s=Math.min(1,aW/pL.w,aH/pL.h);
-  const w=Math.round(pL.w*s), h=Math.round(pL.h*s);
-  ['vpL','vpR'].forEach(i=>{document.getElementById(i).style.cssText+=`width:${w}px;height:${h}px;`;});
-  ['cvL','cvR'].forEach(i=>{document.getElementById(i).style.cssText+=`width:${w}px;height:${h}px;`;});
-  if(loupeOn) applyXform();
+  const w0 = pL.w || pR.w;
+  const h0 = pL.h || pR.h;
+  if (!w0) return;
+  const tH = document.querySelector('.toolbar').offsetHeight;
+  const hH = document.querySelector('.panel-header').offsetHeight;
+  const mH = document.querySelector('.metrics-table')?.offsetHeight || 0;
+  const aH = window.innerHeight - tH - hH - mH - 24;
+  const aW = (window.innerWidth / 2) - 32;
+  const s = Math.min(1, aW / w0, aH / h0);
+  const w = Math.round(w0 * s), h = Math.round(h0 * s);
+  ['vpL','vpR'].forEach(i => { document.getElementById(i).style.width = w + 'px'; document.getElementById(i).style.height = h + 'px'; });
+  ['cvL','cvR'].forEach(i => { document.getElementById(i).style.width = w + 'px'; document.getElementById(i).style.height = h + 'px'; });
+  if (loupeOn) applyXform();
 }
 
 // --- Load ---
-function gifUrl(f,r,e) { return `${BASE_URL}/${f}${r?'-'+r:''}-${e}.gif`; }
-
-async function loadSide(side,f,r,e) {
-  const st=document.getElementById(`status${side}`);
-  document.getElementById(`name${side}`).textContent=e+(r?` ${r}`:' 480p');
-  st.textContent='loading…'; st.style.display='';
-  const player = side==='L' ? pL : pR;
+async function loadSide(side, f, r, e) {
+  const st = document.getElementById(`status${side}`);
+  document.getElementById(`name${side}`).textContent = `${e} ${r}`;
+  st.textContent = 'loading…'; st.style.display = '';
+  const player = side === 'L' ? pL : pR;
   player.stop();
-  await player.load(gifUrl(f,r,e));
-  st.style.display='none';
-  if(side==='L') sizeVp();
+  try {
+    await player.load(gifUrl(f, r, e));
+    st.style.display = 'none';
+  } catch (err) {
+    st.textContent = `GIF not found`;
+  }
+  sizeVp();
 }
 
-// Lock state
+// --- Lock state ---
 let lockedL = false, lockedR = false;
 const $lockL = document.getElementById('lockL');
 const $lockR = document.getElementById('lockR');
-$lockL.addEventListener('click',()=>{ lockedL=!lockedL; $lockL.textContent=lockedL?'\u{1F512}':'\u{1F513}'; $lockL.classList.toggle('locked',lockedL); $lockL.blur(); });
-$lockR.addEventListener('click',()=>{ lockedR=!lockedR; $lockR.textContent=lockedR?'\u{1F512}':'\u{1F513}'; $lockR.classList.toggle('locked',lockedR); $lockR.blur(); });
+$lockL.addEventListener('click', () => { lockedL = !lockedL; $lockL.textContent = lockedL ? '\u{1F512}' : '\u{1F513}'; $lockL.classList.toggle('locked', lockedL); $lockL.blur(); });
+$lockR.addEventListener('click', () => { lockedR = !lockedR; $lockR.textContent = lockedR ? '\u{1F512}' : '\u{1F513}'; $lockR.classList.toggle('locked', lockedR); $lockR.blur(); });
 
 function updateUrl() {
-  const p=new URLSearchParams(location.search);
-  p.set('f',$fix.value); if($res.value)p.set('r',$res.value); else p.delete('r');
-  p.set('l',$encL.value); p.set('e',$encR.value);
-  history.replaceState(null,'','?'+p);
+  const p = new URLSearchParams(location.search);
+  p.set('f', $fix.value); p.set('r', $res.value);
+  p.set('l', $encL.value); p.set('e', $encR.value);
+  history.replaceState(null, '', '?' + p);
 }
 
-const gifSizeCache = {};
-async function getGifSize(f,r,e) {
-  const key = `${f}|${r}|${e}`;
-  if (gifSizeCache[key] !== undefined) return gifSizeCache[key];
-  try {
-    const resp = await fetch(gifUrl(f,r,e), { method: 'HEAD' });
-    if (resp.ok) {
-      const len = parseInt(resp.headers.get('content-length') || '0', 10);
-      gifSizeCache[key] = len;
-      return len;
-    }
-  } catch {}
-  gifSizeCache[key] = 0;
-  return 0;
+function updateMetrics() {
+  const f = $fix.value, r = $res.value;
+  const dL = findM(f, r, $encL.value), dR = findM(f, r, $encR.value);
+  renderMetrics('metricsL', dL, dR);
+  renderMetrics('metricsR', dR, dL);
 }
 
-async function updateMetrics() {
-  const f=$fix.value, r=$res.value, eL=$encL.value, eR=$encR.value;
-  let dL = findM(f,r,eL), dR = findM(f,r,eR);
-  if (!dL) { const sz = await getGifSize(f,r,eL); if (sz) dL = { fileSize: sz }; }
-  if (!dR) { const sz = await getGifSize(f,r,eR); if (sz) dR = { fileSize: sz }; }
-  renderMetrics('metricsL',dL,dR);
-  renderMetrics('metricsR',dR,dL);
-  renderDeltas(dL,dR);
-}
-
-async function update(opts={}) {
-  const { preserveState=false, sidesChanged='both' } = opts;
-  const savedFrame = pL.fi;
+async function update(opts = {}) {
+  const { preserveState = false, sidesChanged = 'both' } = opts;
   const savedPaused = paused;
 
   sharedPause();
-  if (!preserveState) { panX=0; panY=0; paused=false; }
+  if (!preserveState) { panX = 0; panY = 0; paused = false; }
   document.getElementById('vpL').classList.toggle('paused', preserveState ? savedPaused : false);
   document.getElementById('vpR').classList.toggle('paused', preserveState ? savedPaused : false);
 
-  const f=$fix.value, r=$res.value, eL=$encL.value, eR=$encR.value;
+  const f = $fix.value, r = $res.value, eL = $encL.value, eR = $encR.value;
   updateMetrics();
   updateUrl();
 
+  if (sidesChanged === 'both') {
+    await Promise.all([loadSide('L', f, r, eL), loadSide('R', f, r, eR)]);
+  } else if (sidesChanged === 'L') {
+    await loadSide('L', f, r, eL);
+  } else {
+    await loadSide('R', f, r, eR);
+  }
 
-  try {
-    if (sidesChanged === 'both') {
-      await Promise.all([loadSide('L',f,r,eL), loadSide('R',f,r,eR)]);
-    } else if (sidesChanged === 'L') {
-      await loadSide('L',f,r,eL);
-    } else {
-      await loadSide('R',f,r,eR);
-    }
+  if (!preserveState) sharedTime = 0;
+  if (pL.bitmaps.length) pL.show(preserveState ? frameAtTime(pL, sharedTime) : 0);
+  if (pR.bitmaps.length) pR.show(preserveState ? frameAtTime(pR, sharedTime) : 0);
 
-    if (!preserveState) sharedTime = 0;
-    const frameL = preserveState ? frameAtTime(pL, sharedTime) : 0;
-    const frameR = preserveState ? frameAtTime(pR, sharedTime) : 0;
-    pL.show(frameL); pR.show(frameR);
-
-    if (preserveState && savedPaused) {
-      paused = true;
-    } else {
-      paused = false;
-      sharedPlay();
-    }
-  } catch(err) { console.error(err); }
+  if (preserveState && savedPaused) { paused = true; }
+  else { paused = false; sharedPlay(); }
 }
 
-$fix.addEventListener('change',()=>{ $fix.blur(); update(); });
-$res.addEventListener('change',()=>{ $res.blur(); update(); });
-$encL.addEventListener('change',()=>{ $encL.blur(); update({ preserveState:true, sidesChanged:'L' }); });
-$encR.addEventListener('change',()=>{ $encR.blur(); update({ preserveState:true, sidesChanged:'R' }); });
-document.addEventListener('click',e=>{
-  if(e.target.tagName!=='SELECT' && !e.target.classList.contains('lock-btn')) document.activeElement?.blur();
-});
+$fix.addEventListener('change', () => { $fix.blur(); update(); });
+$res.addEventListener('change', () => { $res.blur(); update(); });
+$encL.addEventListener('change', () => { $encL.blur(); update({ preserveState: true, sidesChanged: 'L' }); });
+$encR.addEventListener('change', () => { $encR.blur(); update({ preserveState: true, sidesChanged: 'R' }); });
+document.addEventListener('click', e => { if (e.target.tagName !== 'SELECT') document.activeElement?.blur(); });
 
-// JSON file loader — merges into metrics data, adds new encoders/fixtures to dropdowns
+// --- JSON file loader ---
 document.getElementById('jsonLoad').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -524,163 +465,184 @@ document.getElementById('jsonLoad').addEventListener('change', async (e) => {
     if (!data.results?.length) return;
     if (md) { md.results = md.results.concat(data.results); }
     else { md = data; }
-    // Add any new encoders/fixtures to dropdowns
-    const newEncoders = [...new Set(data.results.map(r => r.encoder))];
-    const newFixtures = [...new Set(data.results.map(r => r.fixture))];
-    const existingEnc = new Set([...$encL.options].map(o => o.value));
-    const existingFix = new Set([...$fix.options].map(o => o.value));
-    newEncoders.forEach(e => { if (!existingEnc.has(e)) { $encL.appendChild(new Option(e,e)); $encR.appendChild(new Option(e,e)); } });
-    newFixtures.forEach(f => { if (!existingFix.has(f)) $fix.appendChild(new Option(f,f)); });
-    console.log(`Loaded ${data.results.length} results from ${file.name}`);
+    buildIndex();
+    populateDropdowns();
     updateMetrics();
   } catch (err) { console.error('Failed to load JSON:', err); }
 });
 
 // --- URL restore ---
-(()=>{
-  const p=new URLSearchParams(location.search);
-  if(p.has('f'))$fix.value=p.get('f');
-  if(p.has('r'))$res.value=p.get('r');
-  if(p.has('l'))$encL.value=p.get('l');
-  if(p.has('e'))$encR.value=p.get('e');
-})();
+function restoreFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('f') && [...$fix.options].some(o => o.value === p.get('f'))) $fix.value = p.get('f');
+  if (p.has('r') && [...$res.options].some(o => o.value === p.get('r'))) $res.value = p.get('r');
+  if (p.has('l') && [...$encL.options].some(o => o.value === p.get('l'))) $encL.value = p.get('l');
+  if (p.has('e') && [...$encR.options].some(o => o.value === p.get('e'))) $encR.value = p.get('e');
+}
 
 // --- Keyboard ---
-let paused=false;
+let paused = false;
 
 function cycleEncoder(delta) {
   const encs = [...$encL.options].map(o => o.value);
   let changed = null;
   if (!lockedL) {
-    const i = encs.indexOf($encL.value);
-    const n = i + delta;
+    const n = encs.indexOf($encL.value) + delta;
     if (n >= 0 && n < encs.length) { $encL.value = encs[n]; changed = changed ? 'both' : 'L'; }
   }
   if (!lockedR) {
-    const i = encs.indexOf($encR.value);
-    const n = i + delta;
+    const n = encs.indexOf($encR.value) + delta;
     if (n >= 0 && n < encs.length) { $encR.value = encs[n]; changed = changed ? 'both' : 'R'; }
   }
   if (changed) update({ preserveState: true, sidesChanged: changed });
 }
 
-let stepHeld = 0;
-let stepInterval = null;
+let stepHeld = 0, stepInterval = null;
 
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='SELECT') return;
-  if(e.key==='ArrowUp'){e.preventDefault();cycleEncoder(-1);}
-  else if(e.key==='ArrowDown'){e.preventDefault();cycleEncoder(1);}
-  else if((e.key==='ArrowRight'||e.key==='ArrowLeft') && !e.repeat){
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowUp') { e.preventDefault(); cycleEncoder(-1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); cycleEncoder(1); }
+  else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.repeat) {
     e.preventDefault();
-    const dir = e.key==='ArrowRight' ? 1 : -1;
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
     doStep(dir);
     stepHeld = dir;
-    stepInterval = setInterval(()=>doStep(stepHeld), 100);
+    stepInterval = setInterval(() => doStep(stepHeld), 100);
   }
-  else if((e.key==='ArrowRight'||e.key==='ArrowLeft') && e.repeat){
-    e.preventDefault();
-  }
-  else if(e.key==='l'||e.key==='L'){toggleLoupe();}
-  else if(e.key===' '){e.preventDefault();togglePause();}
+  else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && e.repeat) { e.preventDefault(); }
+  else if (e.key === 'l' || e.key === 'L') { toggleLoupe(); }
+  else if (e.key === ' ') { e.preventDefault(); togglePause(); }
 });
 
-document.addEventListener('keyup',e=>{
-  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){
-    stepHeld=0;
-    if(stepInterval){clearInterval(stepInterval);stepInterval=null;}
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    stepHeld = 0;
+    if (stepInterval) { clearInterval(stepInterval); stepInterval = null; }
   }
 });
 
-function togglePause(){
-  paused=!paused;
-  if(paused) { sharedPause(); }
-  else { sharedLastT=performance.now(); sharedPlaying=true; sharedTick(); }
-  document.getElementById('vpL').classList.toggle('paused',paused);
-  document.getElementById('vpR').classList.toggle('paused',paused);
+function togglePause() {
+  paused = !paused;
+  if (paused) { sharedPause(); }
+  else { sharedLastT = performance.now(); sharedPlaying = true; sharedTick(); }
+  document.getElementById('vpL').classList.toggle('paused', paused);
+  document.getElementById('vpR').classList.toggle('paused', paused);
 }
-function doStep(d){
-  if(!paused){paused=true; sharedPause();
+
+function doStep(d) {
+  if (!paused) {
+    paused = true; sharedPause();
     document.getElementById('vpL').classList.add('paused');
-    document.getElementById('vpR').classList.add('paused');}
-  // Step by one frame on the LEFT side, sync RIGHT by time
-  if(!pL.bitmaps.length) return;
-  let n=pL.fi+d;
-  if(n<0)n=pL.bitmaps.length-1;
-  if(n>=pL.bitmaps.length)n=0;
-  // Compute time position of target frame on left
-  let t=0;
-  for(let i=0;i<n;i++) t+=pL.delays[i];
-  sharedTime=t;
+    document.getElementById('vpR').classList.add('paused');
+  }
+  if (!pL.bitmaps.length) return;
+  let n = pL.fi + d;
+  if (n < 0) n = pL.bitmaps.length - 1;
+  if (n >= pL.bitmaps.length) n = 0;
+  let t = 0;
+  for (let i = 0; i < n; i++) t += pL.delays[i];
+  sharedTime = t;
   pL.show(n);
-  if(pR.bitmaps.length) pR.show(frameAtTime(pR, t));
+  if (pR.bitmaps.length) pR.show(frameAtTime(pR, t));
 }
 
 // --- Loupe ---
-let loupeOn=false, panX=0, panY=0;
-let dragging=false, dsx=0, dsy=0, psx=0, psy=0;
+let loupeOn = false, panX = 0, panY = 0;
+let dragging = false, dsx = 0, dsy = 0, psx = 0, psy = 0;
 
-function toggleLoupe(){
-  loupeOn=!loupeOn;
-  document.getElementById('loupeBtn').classList.toggle('active',loupeOn);
+function toggleLoupe() {
+  loupeOn = !loupeOn;
+  document.getElementById('loupeBtn').classList.toggle('active', loupeOn);
   document.getElementById('loupeBtn').blur();
-  document.getElementById('vpL').classList.toggle('loupe-active',loupeOn);
-  document.getElementById('vpR').classList.toggle('loupe-active',loupeOn);
-  if(!loupeOn){panX=0;panY=0;}
+  document.getElementById('vpL').classList.toggle('loupe-active', loupeOn);
+  document.getElementById('vpR').classList.toggle('loupe-active', loupeOn);
+  if (!loupeOn) { panX = 0; panY = 0; }
   applyXform();
 }
-document.getElementById('loupeBtn').addEventListener('click',toggleLoupe);
+document.getElementById('loupeBtn').addEventListener('click', toggleLoupe);
 
-function applyXform(){
-  ['cvL','cvR'].forEach(id=>{
-    const cv=document.getElementById(id);
-    if(!loupeOn){cv.style.transform='';return;}
-    const vp=cv.parentElement;
-    panX=Math.max(-vp.clientWidth,Math.min(0,panX));
-    panY=Math.max(-vp.clientHeight,Math.min(0,panY));
-    cv.style.transform=`scale(2) translate(${panX/2}px,${panY/2}px)`;
+function applyXform() {
+  ['cvL','cvR'].forEach(id => {
+    const cv = document.getElementById(id);
+    if (!loupeOn) { cv.style.transform = ''; return; }
+    const vp = cv.parentElement;
+    panX = Math.max(-vp.clientWidth, Math.min(0, panX));
+    panY = Math.max(-vp.clientHeight, Math.min(0, panY));
+    cv.style.transform = `scale(2) translate(${panX/2}px,${panY/2}px)`;
   });
 }
-['vpL','vpR'].forEach(id=>{
-  const el=document.getElementById(id);
-  let clickStart=0, didDrag=false;
-  el.addEventListener('dblclick',e=>{
+
+['vpL','vpR'].forEach(id => {
+  const el = document.getElementById(id);
+  let clickStart = 0, didDrag = false;
+  el.addEventListener('dblclick', e => {
     e.preventDefault();
-    if(!loupeOn) {
-      const vp=document.getElementById(id);
-      const rect=vp.getBoundingClientRect();
-      const clickX=e.clientX-rect.left;
-      const clickY=e.clientY-rect.top;
-      panX=-(clickX);
-      panY=-(clickY);
+    if (!loupeOn) {
+      const rect = el.getBoundingClientRect();
+      panX = -(e.clientX - rect.left);
+      panY = -(e.clientY - rect.top);
     }
     toggleLoupe();
   });
-  el.addEventListener('pointerdown',e=>{
-    clickStart=Date.now();
-    didDrag=false;
-    if(!loupeOn) return;
+  el.addEventListener('pointerdown', e => {
+    clickStart = Date.now(); didDrag = false;
+    if (!loupeOn) return;
     e.preventDefault();
-    dragging=true;dsx=e.clientX;dsy=e.clientY;psx=panX;psy=panY;
-    el.classList.add('dragging');el.setPointerCapture(e.pointerId);
+    dragging = true; dsx = e.clientX; dsy = e.clientY; psx = panX; psy = panY;
+    el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
   });
-  el.addEventListener('pointermove',e=>{
-    if(!dragging)return;
-    const dx=Math.abs(e.clientX-dsx), dy=Math.abs(e.clientY-dsy);
-    if(dx>3||dy>3) didDrag=true;
-    panX=psx+(e.clientX-dsx);panY=psy+(e.clientY-dsy);applyXform();
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - dsx) > 3 || Math.abs(e.clientY - dsy) > 3) didDrag = true;
+    panX = psx + (e.clientX - dsx); panY = psy + (e.clientY - dsy); applyXform();
   });
-  el.addEventListener('pointerup',(e)=>{
-    if(!didDrag && Date.now()-clickStart<300){togglePause();}
-    dragging=false;
+  el.addEventListener('pointerup', () => {
+    if (!didDrag && Date.now() - clickStart < 300) togglePause();
+    dragging = false;
     document.getElementById('vpL').classList.remove('dragging');
     document.getElementById('vpR').classList.remove('dragging');
   });
-  el.addEventListener('pointercancel',()=>{dragging=false;});
+  el.addEventListener('pointercancel', () => { dragging = false; });
 });
-window.addEventListener('resize',sizeVp);
+window.addEventListener('resize', sizeVp);
 
-loadMetrics().then(update);
+// --- Startup ---
+async function init() {
+  const overlay = document.getElementById('loadingOverlay');
+  const params = new URLSearchParams(location.search);
+  const resultsParam = params.get('results');
+  const jsonPaths = resultsParam
+    ? resultsParam.split(',')
+    : ['results/latest/results.json'];
+
+  for (const path of jsonPaths) {
+    try {
+      const resp = await fetch(path);
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (!data.results?.length) continue;
+      if (md) { md.results = md.results.concat(data.results); }
+      else { md = data; }
+      // Derive GIF base URL from the JSON path
+      const dir = path.substring(0, path.lastIndexOf('/'));
+      if (!params.has('base')) BASE_URL = dir + '/gifs';
+    } catch {}
+  }
+
+  if (!md) {
+    overlay.textContent = 'No results found. Load a JSON file or pass ?results=path.json';
+    return;
+  }
+
+  buildIndex();
+  populateDropdowns();
+  restoreFromUrl();
+  overlay.style.display = 'none';
+  update();
+}
+
+init();
 </script>
 </body>
 </html>

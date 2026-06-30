@@ -1,22 +1,29 @@
 /**
- * gifhero benchmark runner
+ * gifhero benchmark runner.
  *
- * Encodes every test fixture with every available encoder,
- * measures quality metrics (VMAF, CAMBI, CIEDE2000, SSIM, PSNR,
- * DSSIM, TFS), and outputs a comparison table.
+ * Usage:
+ *   npx tsx test/bench/run.ts [options]
  *
- * Run: npm run bench
+ * Options:
+ *   --fixtures <names>      Comma-separated fixture names [default: all]
+ *   --resolutions <widths>  Comma-separated target widths [default: 480,360,240,160]
+ *   --encoders <names>      Comma-separated encoder names [default: all]
+ *   --metrics <names>       Comma-separated: vmaf,ssim,psnr,ciede,cambi,dssim,tfs [default: all]
+ *   --out-dir <path>         Base output directory [default: test/bench/results]
+ *   --list                  List available fixtures and encoders, then exit
+ *   --parallel              Encode gifhero variants in parallel via worker threads
+ *   --fast                  Fast mode: 6 fixtures, gifhero+gifski only, skip DSSIM/TFS
+ *
+ * Examples:
+ *   npx tsx test/bench/run.ts --fixtures bbb-clip-01,candle-flame --encoders gifhero,gifski
+ *   npx tsx test/bench/run.ts --resolutions 480,360,240 --metrics vmaf,ssim
+ *   npx tsx test/bench/run.ts --parallel --resolutions 480,360,240,160
  */
 
 import { execSync } from "child_process";
+import { createHash } from "crypto";
 import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
+  existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "fs";
 import { join, basename, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -27,243 +34,61 @@ import { encode } from "../../src/index.js";
 import { encodeParallel } from "./parallel.js";
 import type { EncodeJob } from "./parallel.js";
 
-// ─────────────────────────────────────────────
-// Configuration
-// ─────────────────────────────────────────────
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, "..", "fixtures", "generated");
-const RESULTS_DIR = join(__dirname, "results");
-const TEMP_DIR = join(__dirname, ".tmp");
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
+const FAST_FIXTURES = new Set([
+  "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
+]);
 
-interface EncoderResult {
-  encoder: string;
-  fixture: string;
-  fileSize: number;
-  encodingTimeMs: number;
-  frameCount: number;
-  gifPath: string;
-  // VMAF suite (from single ffmpeg libvmaf pass)
-  vmafMean: number | null;
-  vmafMin: number | null;
-  cambiBanding: number | null;
-  ciede2000: number | null;
-  ssimMean: number | null;
-  psnrMean: number | null;
-  // DSSIM (from dssim CLI)
-  dssimMean: number | null;
-  dssimMax: number | null;
-  dssimP95: number | null;
-  // TFS (temporal flicker)
-  flickerScore: number | null;
-  // Derived
-  vmafPerMB: number | null;
+function fileHash(path: string): string {
+  return createHash("blake2b512").update(readFileSync(path)).digest("hex").slice(0, 32);
 }
 
-interface VmafMetrics {
-  vmafMean: number | null;
-  vmafMin: number | null;
-  cambiBanding: number | null;
-  ciede2000: number | null;
-  ssimMean: number | null;
-  psnrMean: number | null;
+function bufHash(buf: Uint8Array): string {
+  return createHash("blake2b512").update(buf).digest("hex").slice(0, 32);
 }
 
-interface BenchmarkReport {
-  timestamp: string;
-  gitCommit: string | null;
-  results: Omit<EncoderResult, "gifPath">[];
+// ── CLI argument parsing ──
+
+function parseArg(name: string, fallback: string): string {
+  const idx = process.argv.indexOf(`--${name}`);
+  if (idx >= 0 && idx + 1 < process.argv.length) return process.argv[idx + 1];
+  return fallback;
+}
+function hasFlag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
 }
 
-// ─────────────────────────────────────────────
-// Tool detection
-// ─────────────────────────────────────────────
+function getAllFixtures(): string[] {
+  if (!existsSync(FIXTURES_DIR)) return [];
+  return readdirSync(FIXTURES_DIR)
+    .filter(name => {
+      const dir = join(FIXTURES_DIR, name);
+      return statSync(dir).isDirectory() && readdirSync(dir).filter(f => f.endsWith(".png")).length >= 2;
+    })
+    .sort();
+}
+
+// ── Tool detection ──
 
 function hasCommand(cmd: string): boolean {
-  try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
+  try { execSync(`command -v ${cmd}`, { stdio: "ignore" }); return true; } catch { return false; }
 }
-
 function hasVmafSupport(): boolean {
-  try {
-    const output = execSync("ffmpeg -filters 2>&1", {
-      encoding: "utf-8",
-      timeout: 10000,
-    });
-    return output.includes("libvmaf");
-  } catch {
-    return false;
-  }
+  try { return execSync("ffmpeg -filters 2>&1", { encoding: "utf-8", timeout: 10000 }).includes("libvmaf"); } catch { return false; }
 }
 
-function getGitCommit(): string | null {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
-  } catch {
-    return null;
-  }
-}
+// ── Frame loading ──
 
-// ─────────────────────────────────────────────
-// Encoders
-// ─────────────────────────────────────────────
-
-type EncoderFn = (framesDir: string, outputPath: string, frameCount: number) => void | Promise<void>;
-
-// Resolution variants: suffix → target width (null = native)
-const RESOLUTIONS: Array<{ suffix: string; targetWidth: number | null }> = [
-  { suffix: "",      targetWidth: null },
-  { suffix: "-360p", targetWidth: 360 },
-  { suffix: "-240p", targetWidth: 240 },
-  { suffix: "-160p", targetWidth: 160 },
-];
-
-// Build encoder entries dynamically
-const encoders: Record<string, { available: () => boolean; encode: EncoderFn }> = {};
-
-for (const { suffix, targetWidth } of RESOLUTIONS) {
-  // ── gifhero ──
-  encoders[`gifhero-balanced${suffix}`] = {
-    available: () => true,
-    encode: async (framesDir, outputPath) => {
-      const { width, height, frames } = loadPngFrames(framesDir);
-      const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
-      writeFileSync(outputPath, await encode({
-        width, height, frames, preset: "balanced",
-        ...(tw ? { targetWidth: tw } : {}),
-      }));
-    },
-  };
-
-  encoders[`gifhero-quality${suffix}`] = {
-    available: () => true,
-    encode: async (framesDir, outputPath) => {
-      const { width, height, frames } = loadPngFrames(framesDir);
-      const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
-      writeFileSync(outputPath, await encode({
-        width, height, frames, preset: "quality",
-        ...(tw ? { targetWidth: tw } : {}),
-      }));
-    },
-  };
-
-  // ── gifski (default: quality 90) ──
-  encoders[`gifski${suffix}`] = {
-    available: () => hasCommand("gifski"),
-    encode: (framesDir, outputPath) => {
-      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
-      execSync(
-        `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
-      );
-    },
-  };
-
-  // ── gifski lossy (aggressive: quality 80, lossy-quality 30) ──
-  encoders[`gifski-lossy${suffix}`] = {
-    available: () => hasCommand("gifski"),
-    encode: (framesDir, outputPath) => {
-      const widthFlag = targetWidth ? `--width ${targetWidth} ` : "";
-      execSync(
-        `gifski --fps 20 --quality 80 --lossy-quality 80 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
-      );
-    },
-  };
-
-  // ── ffmpeg (global palette, best settings for natural video) ──
-  // stats_mode=full: palette covers entire frame (best for video).
-  // floyd_steinberg: highest quality dither.
-  // diff_mode=rectangle: limits dither noise to changed region, helps LZW.
-  encoders[`ffmpeg${suffix}`] = {
-    available: () => hasCommand("ffmpeg"),
-    encode: (framesDir, outputPath) => {
-      const scaleFilter = targetWidth
-        ? `scale=${targetWidth}:-1:flags=lanczos,`
-        : "";
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000 }
-      );
-    },
-  };
-
-  // ── ffmpeg per-frame palette (highest possible ffmpeg quality) ──
-  // stats_mode=single + new=1: fresh palette per frame.
-  // Best color accuracy, larger files.
-  encoders[`ffmpeg-hq${suffix}`] = {
-    available: () => hasCommand("ffmpeg"),
-    encode: (framesDir, outputPath) => {
-      const scaleFilter = targetWidth
-        ? `scale=${targetWidth}:-1:flags=lanczos,`
-        : "";
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=single[p];[s1][p]paletteuse=new=1:dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000 }
-      );
-    },
-  };
-
-  // ── ImageMagick (optimized: coalesce + OptimizePlus + OptimizeTransparency) ──
-  // -coalesce: expand all frames to full canvas before optimizing.
-  // OptimizePlus: minimal changed rectangles + frame doubling.
-  // OptimizeTransparency: replace unchanged pixels with transparency for LZW.
-  // FloydSteinberg: best dither for natural content.
-  encoders[`magick${suffix}`] = {
-    available: () => hasCommand("magick"),
-    encode: (framesDir, outputPath) => {
-      const resizeFlag = targetWidth ? `-resize ${targetWidth}x` : "";
-      execSync(
-        `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resizeFlag} -dither FloydSteinberg -colors 256 -coalesce -layers OptimizePlus -layers OptimizeTransparency "${outputPath}"`,
-        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" }
-      );
-    },
-  };
-
-  // ── ffmpeg + gifsicle (best pipeline combo) ──
-  // ffmpeg global palette for quality, gifsicle -O3 --lossy=80 for size.
-  // --color-method=median-cut: better color distribution for photos.
-  encoders[`ffmpeg+gifsicle${suffix}`] = {
-    available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
-    encode: (framesDir, outputPath) => {
-      const scaleFilter = targetWidth
-        ? `scale=${targetWidth}:-1:flags=lanczos,`
-        : "";
-      const tmpGif = outputPath + ".tmp.gif";
-      execSync(
-        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scaleFilter}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${tmpGif}"`,
-        { stdio: "ignore", timeout: 120000 }
-      );
-      execSync(
-        `gifsicle -O3 --lossy=80 --color-method=median-cut "${tmpGif}" -o "${outputPath}"`,
-        { stdio: "ignore", timeout: 60000 }
-      );
-      try { rmSync(tmpGif); } catch {}
-    },
-  };
-}
-
-function loadPngFrames(dir: string): {
-  width: number;
-  height: number;
-  frames: Array<{ data: Uint8ClampedArray; delay: number }>;
-} {
-  const files = readdirSync(dir).filter((f: string) => f.endsWith(".png")).sort();
-  let width = 0;
-  let height = 0;
+function loadPngFrames(dir: string, targetWidth?: number) {
+  const files = readdirSync(dir).filter(f => f.endsWith(".png")).sort();
+  let width = 0, height = 0;
   const frames: Array<{ data: Uint8ClampedArray; delay: number }> = [];
   for (const file of files) {
     const img = new Image();
     img.src = readFileSync(join(dir, file));
-    if (width === 0) { width = img.width; height = img.height; }
+    if (!width) { width = img.width; height = img.height; }
     const canvas = createCanvas(img.width, img.height);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img, 0, 0);
@@ -272,904 +97,607 @@ function loadPngFrames(dir: string): {
   return { width, height, frames };
 }
 
-// ─────────────────────────────────────────────
-// Fixture discovery
-// ─────────────────────────────────────────────
+// ── Encoder definitions ──
 
-function getFixtures(): string[] {
-  if (!existsSync(FIXTURES_DIR)) return [];
+interface EncodeResult { timing?: Record<string, number> }
+type EncoderFn = (framesDir: string, outputPath: string, targetWidth?: number) => EncodeResult | Promise<EncodeResult> | void | Promise<void>;
 
-  return readdirSync(FIXTURES_DIR)
-    .filter((name) => {
-      const dir = join(FIXTURES_DIR, name);
-      if (!statSync(dir).isDirectory()) return false;
-      const pngs = readdirSync(dir).filter((f) => f.endsWith(".png"));
-      return pngs.length >= 2;
-    })
-    .sort();
-}
-
-function countFrames(dir: string): number {
-  return readdirSync(dir).filter((f) => f.endsWith(".png")).length;
-}
-
-// ─────────────────────────────────────────────
-// Frame validation
-// ─────────────────────────────────────────────
-
-interface FrameValidation {
-  valid: boolean;
-  sourceCount: number;
-  extractedCount: number;
-  width: number;
-  height: number;
-}
-
-function validateFrames(
-  sourceDir: string,
-  extractedDir: string,
-  encoderName: string,
-  fixtureName: string
-): FrameValidation {
-  const sourcePngs = readdirSync(sourceDir).filter((f) => f.endsWith(".png")).sort();
-  const extractedPngs = readdirSync(extractedDir).filter((f) => f.endsWith(".png")).sort();
-
-  if (sourcePngs.length !== extractedPngs.length) {
-    console.log(
-      `    ⚠ Frame count mismatch: ${sourcePngs.length} source vs ` +
-      `${extractedPngs.length} extracted for ${encoderName}/${fixtureName}`
-    );
-    return {
-      valid: false,
-      sourceCount: sourcePngs.length,
-      extractedCount: extractedPngs.length,
-      width: 0,
-      height: 0,
-    };
-  }
-
-  // Check dimensions of first frame in each
-  const srcImg = new Image();
-  srcImg.src = readFileSync(join(sourceDir, sourcePngs[0]));
-  const extImg = new Image();
-  extImg.src = readFileSync(join(extractedDir, extractedPngs[0]));
-
-  if (srcImg.width !== extImg.width || srcImg.height !== extImg.height) {
-    console.log(
-      `    ⚠ Dimension mismatch: ${srcImg.width}x${srcImg.height} source vs ` +
-      `${extImg.width}x${extImg.height} extracted for ${encoderName}/${fixtureName}`
-    );
-    return {
-      valid: false,
-      sourceCount: sourcePngs.length,
-      extractedCount: extractedPngs.length,
-      width: srcImg.width,
-      height: srcImg.height,
-    };
-  }
-
-  return {
-    valid: true,
-    sourceCount: sourcePngs.length,
-    extractedCount: extractedPngs.length,
-    width: srcImg.width,
-    height: srcImg.height,
-  };
-}
-
-// ─────────────────────────────────────────────
-// VMAF + SSIM + PSNR (single ffmpeg pass)
-// ─────────────────────────────────────────────
-
-const NULL_VMAF: VmafMetrics = {
-  vmafMean: null,
-  vmafMin: null,
-  cambiBanding: null,
-  ciede2000: null,
-  ssimMean: null,
-  psnrMean: null,
+const ALL_ENCODERS: Record<string, { available: () => boolean; encode: EncoderFn }> = {
+  "gifhero": {
+    available: () => true,
+    encode: async (framesDir, outputPath, targetWidth) => {
+      const { width, height, frames } = loadPngFrames(framesDir);
+      const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
+      const timing: Record<string, number> = {};
+      writeFileSync(outputPath, await encode({
+        width, height, frames, preset: "balanced", lossyLzw: 0, timing,
+        ...(tw ? { targetWidth: tw } : {}),
+      }));
+      return { timing };
+    },
+  },
+  "gifski": {
+    available: () => hasCommand("gifski"),
+    encode: (framesDir, outputPath, targetWidth) => {
+      const wFlag = targetWidth ? `--width ${targetWidth} ` : "";
+      execSync(`gifski --fps 20 ${wFlag}-o "${outputPath}" "${framesDir}"/*.png`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" });
+    },
+  },
+  "ffmpeg": {
+    available: () => hasCommand("ffmpeg"),
+    encode: (framesDir, outputPath, targetWidth) => {
+      const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000 });
+    },
+  },
+  "ffmpeg-hq": {
+    available: () => hasCommand("ffmpeg"),
+    encode: (framesDir, outputPath, targetWidth) => {
+      const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=single[p];[s1][p]paletteuse=new=1:dither=floyd_steinberg:diff_mode=rectangle" "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000 });
+    },
+  },
+  "magick": {
+    available: () => hasCommand("magick"),
+    encode: (framesDir, outputPath, targetWidth) => {
+      const resize = targetWidth ? `-resize ${targetWidth}x` : "";
+      execSync(
+        `magick -delay 5 -loop 0 "${framesDir}/"*.png ${resize} -dither FloydSteinberg -colors 256 -coalesce -layers OptimizePlus -layers OptimizeTransparency "${outputPath}"`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" });
+    },
+  },
+  "ffmpeg+gifsicle": {
+    available: () => hasCommand("ffmpeg") && hasCommand("gifsicle"),
+    encode: (framesDir, outputPath, targetWidth) => {
+      const scale = targetWidth ? `scale=${targetWidth}:-1:flags=lanczos,` : "";
+      const tmp = outputPath + ".tmp.gif";
+      execSync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -vf "${scale}split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=full[p];[s1][p]paletteuse=dither=floyd_steinberg:diff_mode=rectangle" "${tmp}"`,
+        { stdio: "ignore", timeout: 120000 });
+      execSync(`gifsicle -O3 --lossy=80 --color-method=median-cut "${tmp}" -o "${outputPath}"`,
+        { stdio: "ignore", timeout: 60000 });
+      try { rmSync(tmp); } catch {}
+    },
+  },
 };
 
-function computeVmafMetrics(
-  sourceDir: string,
-  gifPath: string,
-  width: number,
-  height: number,
-  logDir: string
-): VmafMetrics {
+// ── GIF inspection ──
+
+interface GifInspection {
+  frameCount: number;
+  logicalWidth: number;
+  logicalHeight: number;
+  hasGlobalColorTable: boolean;
+  globalColorTableSize: number;
+  // Palette
+  minPaletteSize: number;
+  maxPaletteSize: number;
+  avgPaletteSize: number;
+  // Compression
+  avgFrameCompressedBytes: number;
+  minFrameCompressedBytes: number;
+  maxFrameCompressedBytes: number;
+  totalCompressedBytes: number;
+  // Sub-framing
+  fullFrameCount: number;
+  subFrameCount: number;
+  avgSubFrameCoverage: number;
+  minSubFrameCoverage: number;
+  // Transparency
+  transparentFrameCount: number;
+  // Timing
+  delays: number[];           // all unique delay values in seconds
+  avgDelay: number;
+  minDelay: number;
+  maxDelay: number;
+  constantDelay: boolean;     // true if all frames have the same delay
+  // Disposal
+  disposalMethods: Record<string, number>;
+  // Metadata
+  loopCount: string;          // "forever", "none", or number
+  comments: string[];
+  interlaced: boolean;
+  // Derived
+  durationSeconds: number;
+  effectiveFps: number;
+  bitsPerPixel: number;       // totalCompressedBytes * 8 / (frameCount * w * h)
+}
+
+function inspectGif(gifPath: string, canvasW: number, canvasH: number): GifInspection | null {
+  if (!hasCommand("gifsicle")) return null;
+  try {
+    const out = execSync(`gifsicle --sinfo "${gifPath}" 2>&1`, { encoding: "utf-8", timeout: 10000 });
+    const lines = out.split("\n");
+
+    let logicalWidth = 0, logicalHeight = 0;
+    let hasGCT = false, gctSize = 0;
+    let loopCount = "none";
+    let interlaced = false;
+    const comments: string[] = [];
+    const paletteSizes: number[] = [];
+    const compressedSizes: number[] = [];
+    const frameDims: Array<{ w: number; h: number }> = [];
+    const frameDelays: number[] = [];
+    let transparentCount = 0;
+    const disposals: Record<string, number> = {};
+
+    for (const line of lines) {
+      const lsMatch = line.match(/logical screen (\d+)x(\d+)/);
+      if (lsMatch) { logicalWidth = +lsMatch[1]; logicalHeight = +lsMatch[2]; }
+
+      const gctMatch = line.match(/global color table \[(\d+)\]/);
+      if (gctMatch) { hasGCT = true; gctSize = +gctMatch[1]; }
+
+      if (line.includes("loop forever")) loopCount = "forever";
+      const loopMatch = line.match(/loop count (\d+)/);
+      if (loopMatch) loopCount = loopMatch[1];
+
+      const imgMatch = line.match(/image #\d+ (\d+)x(\d+)/);
+      if (imgMatch) frameDims.push({ w: +imgMatch[1], h: +imgMatch[2] });
+
+      const csMatch = line.match(/compressed size (\d+)/);
+      if (csMatch) compressedSizes.push(+csMatch[1]);
+
+      const lctMatch = line.match(/local color table \[(\d+)\]/);
+      if (lctMatch) paletteSizes.push(+lctMatch[1]);
+
+      if (line.includes("transparent")) transparentCount++;
+      if (line.includes("interlaced")) interlaced = true;
+
+      const delayMatch = line.match(/delay ([\d.]+)s/);
+      if (delayMatch) frameDelays.push(parseFloat(delayMatch[1]));
+
+      const dispMatch = line.match(/disposal (\w+)/);
+      if (dispMatch) {
+        const d = dispMatch[1];
+        disposals[d] = (disposals[d] || 0) + 1;
+      }
+
+      const commentMatch = line.match(/comment (.+)/);
+      if (commentMatch) comments.push(commentMatch[1].trim());
+    }
+
+    const w = logicalWidth || canvasW;
+    const h = logicalHeight || canvasH;
+    const canvasPixels = w * h;
+    const fullFrames = frameDims.filter(d => d.w * d.h >= canvasPixels * 0.95).length;
+    const subFrames = frameDims.filter(d => d.w * d.h < canvasPixels * 0.95);
+    const subCoverages = subFrames.map(d => (d.w * d.h) / canvasPixels);
+    const avgCoverage = subCoverages.length > 0
+      ? subCoverages.reduce((s, c) => s + c, 0) / subCoverages.length : 0;
+    const minCoverage = subCoverages.length > 0 ? Math.min(...subCoverages) : 0;
+
+    const totalCompressed = compressedSizes.reduce((a, b) => a + b, 0);
+    const totalDuration = frameDelays.reduce((a, b) => a + b, 0);
+    const uniqueDelays = [...new Set(frameDelays)];
+
+    return {
+      frameCount: frameDims.length,
+      logicalWidth: w,
+      logicalHeight: h,
+      hasGlobalColorTable: hasGCT,
+      globalColorTableSize: gctSize,
+      minPaletteSize: paletteSizes.length > 0 ? Math.min(...paletteSizes) : 0,
+      maxPaletteSize: paletteSizes.length > 0 ? Math.max(...paletteSizes) : 0,
+      avgPaletteSize: paletteSizes.length > 0 ? Math.round(paletteSizes.reduce((a, b) => a + b, 0) / paletteSizes.length) : 0,
+      avgFrameCompressedBytes: compressedSizes.length > 0 ? Math.round(compressedSizes.reduce((a, b) => a + b, 0) / compressedSizes.length) : 0,
+      minFrameCompressedBytes: compressedSizes.length > 0 ? Math.min(...compressedSizes) : 0,
+      maxFrameCompressedBytes: compressedSizes.length > 0 ? Math.max(...compressedSizes) : 0,
+      totalCompressedBytes: totalCompressed,
+      fullFrameCount: fullFrames,
+      subFrameCount: subFrames.length,
+      avgSubFrameCoverage: Math.round(avgCoverage * 1000) / 1000,
+      minSubFrameCoverage: Math.round(minCoverage * 1000) / 1000,
+      transparentFrameCount: transparentCount,
+      delays: uniqueDelays,
+      avgDelay: frameDelays.length > 0 ? Math.round(frameDelays.reduce((a, b) => a + b, 0) / frameDelays.length * 1000) / 1000 : 0,
+      minDelay: frameDelays.length > 0 ? Math.min(...frameDelays) : 0,
+      maxDelay: frameDelays.length > 0 ? Math.max(...frameDelays) : 0,
+      constantDelay: uniqueDelays.length <= 1,
+      disposalMethods: disposals,
+      loopCount,
+      comments,
+      interlaced,
+      durationSeconds: Math.round(totalDuration * 100) / 100,
+      effectiveFps: totalDuration > 0 ? Math.round(frameDims.length / totalDuration * 10) / 10 : 0,
+      bitsPerPixel: frameDims.length > 0 ? Math.round(totalCompressed * 8 / (frameDims.length * w * h) * 10000) / 10000 : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Quality metrics ──
+
+function computeVmafMetrics(framesDir: string, gifPath: string, w: number, h: number, logDir: string) {
   const logVmaf = join(logDir, `${basename(gifPath, ".gif")}-vmaf.json`);
   const logCambi = join(logDir, `${basename(gifPath, ".gif")}-cambi.json`);
-  mkdirSync(logDir, { recursive: true });
 
-  // Pass 1: VMAF + CIEDE2000 + SSIM + PSNR (reference vs distorted)
-  const cmd =
-    `ffmpeg -y -framerate 20 -i "${sourceDir}/%04d.png" -r 20 -i "${gifPath}" ` +
-    `-filter_complex "` +
-    `[1:v]scale=${width}:${height}:flags=bicubic[dist];` +
-    `[0:v]split=3[r1][r2][r3];` +
-    `[dist]split=3[d1][d2][d3];` +
-    `[r1][d1]libvmaf=log_path=${logVmaf}:log_fmt=json:feature=name=ciede;` +
-    `[r2][d2]ssim;` +
-    `[r3][d3]psnr` +
-    `" -f null - 2>&1`;
+  let vmafMean: number | null = null, vmafMin: number | null = null;
+  let ssim: number | null = null, psnr: number | null = null;
+  let ciede: number | null = null, cambi: number | null = null;
 
-  let output: string;
+  // VMAF + SSIM + PSNR + CIEDE2000
   try {
-    output = execSync(cmd, { encoding: "utf-8", timeout: 300000 });
-  } catch {
-    return NULL_VMAF;
-  }
-
-  let ssimMean: number | null = null;
-  const ssimMatch = output.match(/SSIM.*All:([\d.]+)/);
-  if (ssimMatch) {
-    ssimMean = parseFloat(ssimMatch[1]);
-    if (isNaN(ssimMean)) ssimMean = null;
-  }
-
-  let psnrMean: number | null = null;
-  const psnrMatch = output.match(/PSNR.*average:([\d.]+)/);
-  if (psnrMatch) {
-    psnrMean = parseFloat(psnrMatch[1]);
-    if (isNaN(psnrMean)) psnrMean = null;
-  }
-
-  let vmafMean: number | null = null;
-  let vmafMin: number | null = null;
-  let ciede2000: number | null = null;
-
-  try {
-    const data = JSON.parse(readFileSync(logVmaf, "utf-8"));
-    const pooled = data.pooled_metrics;
-    if (pooled?.vmaf) {
-      vmafMean = pooled.vmaf.mean ?? null;
-      vmafMin = pooled.vmaf.min ?? null;
-    }
-    if (pooled?.ciede2000) {
-      const v = pooled.ciede2000.mean;
-      ciede2000 = v !== null && v !== undefined ? v : null;
+    const cmd =
+      `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -r 20 -i "${gifPath}" ` +
+      `-filter_complex "` +
+      `[0:v]scale=${w}:${h}:flags=bicubic[ref];` +
+      `[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
+      `[ref]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
+      `[r1][d1]libvmaf=log_path=${logVmaf}:log_fmt=json:feature=name=ciede;` +
+      `[r2][d2]ssim;[r3][d3]psnr" -f null - 2>&1`;
+    const out = execSync(cmd, { encoding: "utf-8", timeout: 300000 });
+    const sm = out.match(/SSIM.*All:([\d.]+)/); if (sm) ssim = parseFloat(sm[1]);
+    const pm = out.match(/PSNR.*average:([\d.]+)/); if (pm) psnr = parseFloat(pm[1]);
+    if (existsSync(logVmaf)) {
+      const d = JSON.parse(readFileSync(logVmaf, "utf-8")).pooled_metrics;
+      vmafMean = d?.vmaf?.mean ?? null;
+      vmafMin = d?.vmaf?.min ?? null;
+      ciede = d?.ciede2000?.mean ?? null;
     }
   } catch {}
 
-  // Pass 2: CAMBI (no-reference, measured on the distorted GIF only).
-  // CAMBI detects banding artifacts in the output — using the GIF as
-  // both inputs ensures we measure the GIF, not the source.
-  let cambiBanding: number | null = null;
+  // CAMBI
   try {
-    const cambiCmd =
-      `ffmpeg -y -i "${gifPath}" ` +
-      `-filter_complex "[0:v]split[a][b];[a][b]libvmaf=feature=name=cambi:log_path=${logCambi}:log_fmt=json" ` +
-      `-f null - 2>&1`;
-    execSync(cambiCmd, { encoding: "utf-8", timeout: 120000 });
-    const data = JSON.parse(readFileSync(logCambi, "utf-8"));
-    if (data.pooled_metrics?.cambi) {
-      cambiBanding = data.pooled_metrics.cambi.mean ?? null;
-    }
+    execSync(`ffmpeg -y -i "${gifPath}" -filter_complex "[0:v]split[a][b];[a][b]libvmaf=feature=name=cambi:log_path=${logCambi}:log_fmt=json" -f null - 2>&1`,
+      { encoding: "utf-8", timeout: 120000 });
+    cambi = JSON.parse(readFileSync(logCambi, "utf-8")).pooled_metrics?.cambi?.mean ?? null;
   } catch {}
 
-  return { vmafMean, vmafMin, cambiBanding, ciede2000, ssimMean, psnrMean };
+  return { vmafMean, vmafMin, ssim, psnr, ciede, cambi };
 }
 
-// ─────────────────────────────────────────────
-// Temporal Flicker Score
-// ─────────────────────────────────────────────
-
-function computeTFS(
-  sourceDir: string,
-  extractedDir: string,
-  width: number,
-  height: number,
-  frameCount: number
-): number | null {
-  if (frameCount < 2) return null;
-
-  const sourcePngs = readdirSync(sourceDir).filter((f) => f.endsWith(".png")).sort();
-  const extractedPngs = readdirSync(extractedDir).filter((f) => f.endsWith(".png")).sort();
-
-  const count = Math.min(sourcePngs.length, extractedPngs.length, frameCount);
-
-  const sourceFrames: Uint8ClampedArray[] = [];
-  const encodedFrames: Uint8ClampedArray[] = [];
-
-  for (let i = 0; i < count; i++) {
-    // Load source frame
-    const srcImg = new Image();
-    srcImg.src = readFileSync(join(sourceDir, sourcePngs[i]));
-    const srcCanvas = createCanvas(width, height);
-    const srcCtx = srcCanvas.getContext("2d");
-    srcCtx.drawImage(srcImg, 0, 0, width, height);
-    sourceFrames.push(srcCtx.getImageData(0, 0, width, height).data);
-
-    // Load extracted frame
-    const extImg = new Image();
-    extImg.src = readFileSync(join(extractedDir, extractedPngs[i]));
-    const extCanvas = createCanvas(width, height);
-    const extCtx = extCanvas.getContext("2d");
-    extCtx.drawImage(extImg, 0, 0, width, height);
-    encodedFrames.push(extCtx.getImageData(0, 0, width, height).data);
-  }
-
-  try {
-    const result = computeFlickerScore(sourceFrames, encodedFrames, width, height);
-    return result.score;
-  } catch (err) {
-    console.log(`    ⚠ TFS failed: ${(err as Error).message}`);
-    return null;
-  }
-}
-
-// ─────────────────────────────────────────────
-// Benchmark logic
-// ─────────────────────────────────────────────
-
-async function measureEncoder(
-  encoderName: string,
-  fixtureName: string,
-  framesDir: string,
-  outputPath: string,
-  fileSize: number,
-  encodingTimeMs: number,
-  frameCount: number,
-  vmafAvailable: boolean,
-  dssimAvail: boolean,
-): Promise<EncoderResult | null> {
-  const framesExtractDir = join(TEMP_DIR, "frames");
-  const logsDir = join(TEMP_DIR, "logs");
-  mkdirSync(framesExtractDir, { recursive: true });
-  mkdirSync(logsDir, { recursive: true });
-
-  const extractDir = join(framesExtractDir, `${fixtureName}-${encoderName}`);
-  try {
-    extractGifFrames(outputPath, extractDir);
-  } catch {
-    return {
-      encoder: encoderName, fixture: fixtureName, fileSize, encodingTimeMs,
-      frameCount, gifPath: outputPath,
-      vmafMean: null, vmafMin: null, cambiBanding: null, ciede2000: null,
-      ssimMean: null, psnrMean: null, dssimMean: null, dssimMax: null,
-      dssimP95: null, flickerScore: null, vmafPerMB: null,
-    };
-  }
-
-  const validation = validateFrames(framesDir, extractDir, encoderName, fixtureName);
-  let vmafMetrics = NULL_VMAF;
-  let dssimMean: number | null = null;
-  let dssimMax: number | null = null;
-  let dssimP95: number | null = null;
-  let flickerScore: number | null = null;
-
-  const outW = validation.width || 0;
-  const outH = validation.height || 0;
-
-  if (validation.valid || (outW > 0 && outH > 0)) {
-    if (vmafAvailable) {
-      try {
-        vmafMetrics = computeVmafMetrics(framesDir, outputPath, outW, outH, logsDir);
-      } catch {}
-    }
-    if (dssimAvail) {
-      try {
-        const srcImg = new Image();
-        const srcFiles = readdirSync(framesDir).filter((f: string) => f.endsWith(".png")).sort();
-        srcImg.src = readFileSync(join(framesDir, srcFiles[0]));
-        const needsScale = srcImg.width !== outW || srcImg.height !== outH;
-        const d = needsScale
-          ? dssimFrames(framesDir, extractDir, outW, outH)
-          : dssimFrames(framesDir, extractDir);
-        dssimMean = d.mean; dssimMax = d.max; dssimP95 = d.p95;
-      } catch {}
-    }
-    if (frameCount >= 2 && !FAST_MODE) {
-      try {
-        flickerScore = computeTFS(framesDir, extractDir, outW, outH, frameCount);
-      } catch {}
-    }
-  }
-
-  const vmafPerMB = vmafMetrics.vmafMean !== null
-    ? vmafMetrics.vmafMean / (fileSize / (1024 * 1024)) : null;
-
-  return {
-    encoder: encoderName, fixture: fixtureName, fileSize, encodingTimeMs,
-    frameCount, gifPath: outputPath,
-    vmafMean: vmafMetrics.vmafMean, vmafMin: vmafMetrics.vmafMin,
-    cambiBanding: vmafMetrics.cambiBanding, ciede2000: vmafMetrics.ciede2000,
-    ssimMean: vmafMetrics.ssimMean, psnrMean: vmafMetrics.psnrMean,
-    dssimMean, dssimMax, dssimP95, flickerScore, vmafPerMB,
-  };
-}
-
-async function benchmarkEncoder(
-  encoderName: string,
-  encodeFn: EncoderFn,
-  fixtureName: string,
-  framesDir: string,
-  vmafAvailable: boolean,
-  dssimAvail: boolean
-): Promise<EncoderResult | null> {
-  const gifsDir = join(TEMP_DIR, "gifs");
-  const framesExtractDir = join(TEMP_DIR, "frames");
-  const logsDir = join(TEMP_DIR, "logs");
-  mkdirSync(gifsDir, { recursive: true });
-  mkdirSync(framesExtractDir, { recursive: true });
-  mkdirSync(logsDir, { recursive: true });
-
-  const outputPath = join(gifsDir, `${fixtureName}-${encoderName}.gif`);
-  const frameCount = countFrames(framesDir);
-
-  // Encode and time it
-  const start = performance.now();
-  try {
-    await encodeFn(framesDir, outputPath, frameCount);
-  } catch (err) {
-    console.error(`    ✗ ${encoderName} failed: ${(err as Error).message}`);
-    return null;
-  }
-  const encodingTimeMs = Math.round(performance.now() - start);
-
-  if (!existsSync(outputPath)) {
-    console.error(`    ✗ ${encoderName} produced no output`);
-    return null;
-  }
-
-  const fileSize = statSync(outputPath).size;
-
-  // Extract GIF frames
-  const extractDir = join(framesExtractDir, `${fixtureName}-${encoderName}`);
-  try {
-    extractGifFrames(outputPath, extractDir);
-  } catch (err) {
-    console.error(`    ⚠ Frame extraction failed: ${(err as Error).message}`);
-    return {
-      encoder: encoderName,
-      fixture: fixtureName,
-      fileSize,
-      encodingTimeMs,
-      frameCount,
-      gifPath: outputPath,
-      vmafMean: null,
-      vmafMin: null,
-      cambiBanding: null,
-      ciede2000: null,
-      ssimMean: null,
-      psnrMean: null,
-      dssimMean: null,
-      dssimMax: null,
-      dssimP95: null,
-      flickerScore: null,
-      vmafPerMB: null,
-    };
-  }
-
-  // Validate frames
-  const validation = validateFrames(framesDir, extractDir, encoderName, fixtureName);
-
-  let vmafMetrics = NULL_VMAF;
-  let dssimMean: number | null = null;
-  let dssimMax: number | null = null;
-  let dssimP95: number | null = null;
-  let flickerScore: number | null = null;
-
-  const encW = validation.width || 0;
-  const encH = validation.height || 0;
-
-  if (validation.valid || (encW > 0 && encH > 0)) {
-    // VMAF suite
-    if (vmafAvailable) {
-      try {
-        vmafMetrics = computeVmafMetrics(
-          framesDir,
-          outputPath,
-          encW,
-          encH,
-          logsDir
-        );
-      } catch (err) {
-        console.log(`    ⚠ VMAF failed: ${(err as Error).message}`);
-      }
-    }
-
-    // DSSIM
-    if (dssimAvail) {
-      try {
-        const srcFiles = readdirSync(framesDir).filter((f: string) => f.endsWith(".png")).sort();
-        const srcImg = new Image();
-        srcImg.src = readFileSync(join(framesDir, srcFiles[0]));
-        const needsScale = srcImg.width !== encW || srcImg.height !== encH;
-        const dssim = needsScale
-          ? dssimFrames(framesDir, extractDir, encW, encH)
-          : dssimFrames(framesDir, extractDir);
-        dssimMean = dssim.mean;
-        dssimMax = dssim.max;
-        dssimP95 = dssim.p95;
-      } catch (err) {
-        console.log(`    ⚠ DSSIM failed: ${(err as Error).message}`);
-      }
-    }
-
-    // TFS (skip in fast mode — loading 60 RGBA frame pairs is expensive)
-    if (frameCount >= 2 && !FAST_MODE) {
-      try {
-        flickerScore = computeTFS(
-          framesDir,
-          extractDir,
-          validation.width,
-          validation.height,
-          frameCount
-        );
-      } catch (err) {
-        console.log(`    ⚠ TFS failed: ${(err as Error).message}`);
-      }
-    }
-  }
-
-  // Rate-distortion
-  const vmafPerMB =
-    vmafMetrics.vmafMean !== null
-      ? vmafMetrics.vmafMean / (fileSize / (1024 * 1024))
-      : null;
-
-  return {
-    encoder: encoderName,
-    fixture: fixtureName,
-    fileSize,
-    encodingTimeMs,
-    frameCount,
-    gifPath: outputPath,
-    vmafMean: vmafMetrics.vmafMean,
-    vmafMin: vmafMetrics.vmafMin,
-    cambiBanding: vmafMetrics.cambiBanding,
-    ciede2000: vmafMetrics.ciede2000,
-    ssimMean: vmafMetrics.ssimMean,
-    psnrMean: vmafMetrics.psnrMean,
-    dssimMean,
-    dssimMax,
-    dssimP95,
-    flickerScore,
-    vmafPerMB,
-  };
-}
-
-// ─────────────────────────────────────────────
-// Output formatting
-// ─────────────────────────────────────────────
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-function formatTime(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function fmtVmaf(v: number | null): string {
-  if (v === null) return "  n/a";
-  return v.toFixed(1).padStart(5);
-}
-
-function fmtCambi(v: number | null): string {
-  if (v === null) return " n/a";
-  return v.toFixed(2).padStart(5);
-}
-
-function fmtCiede(v: number | null): string {
-  if (v === null) return " n/a";
-  return v.toFixed(2).padStart(5);
-}
-
-function fmtDssim(v: number | null): string {
-  if (v === null) return "    n/a";
-  return v.toFixed(5).padStart(7);
-}
-
-function fmtTfs(v: number | null): string {
-  if (v === null) return "  n/a";
-  return v.toFixed(3).padStart(5);
-}
-
-function fmtVmafPerMB(v: number | null): string {
-  if (v === null) return "   n/a";
-  return v.toFixed(1).padStart(6);
-}
-
-function sortResults(rows: EncoderResult[], vmafAvailable: boolean): EncoderResult[] {
-  if (vmafAvailable && rows.some((r) => r.vmafMean !== null)) {
-    return [...rows].sort((a, b) => (b.vmafMean ?? -1) - (a.vmafMean ?? -1));
-  }
-  return [...rows].sort((a, b) => (a.dssimMean ?? 999) - (b.dssimMean ?? 999));
-}
-
-function printTable(results: EncoderResult[], vmafAvailable: boolean) {
-  const fixtures = [...new Set(results.map((r) => r.fixture))];
-
-  for (const fixture of fixtures) {
-    const rows = sortResults(
-      results.filter((r) => r.fixture === fixture),
-      vmafAvailable
-    );
-
-    const frameLabel = `${rows[0]?.frameCount ?? "?"} frames`;
-    const header =
-      "Encoder".padEnd(20) +
-      " VMAF".padStart(5) +
-      " CAMBI".padStart(6) +
-      " CIEDE".padStart(6) +
-      "  DSSIM".padStart(8) +
-      "   TFS".padStart(6) +
-      "    Size".padStart(8) +
-      " VMAF/MB".padStart(8) +
-      "    Time".padStart(8);
-
-    const rule = "─".repeat(header.length);
-
-    console.log("");
-    console.log(`  ┌─ ${fixture} (${frameLabel}) ${"─".repeat(Math.max(0, header.length - fixture.length - frameLabel.length - 6))}`);
-    console.log(`  │ ${header}`);
-    console.log(`  │ ${rule}`);
-
-    for (const row of rows) {
-      console.log(
-        `  │ ` +
-        row.encoder.padEnd(20) +
-        fmtVmaf(row.vmafMean) +
-        " " +
-        fmtCambi(row.cambiBanding) +
-        " " +
-        fmtCiede(row.ciede2000) +
-        " " +
-        fmtDssim(row.dssimMean) +
-        " " +
-        fmtTfs(row.flickerScore) +
-        " " +
-        formatSize(row.fileSize).padStart(7) +
-        " " +
-        fmtVmafPerMB(row.vmafPerMB) +
-        " " +
-        formatTime(row.encodingTimeMs).padStart(7)
-      );
-    }
-    console.log(`  └${rule}─`);
-  }
-}
-
-function oneLiner(result: EncoderResult, vmafAvailable: boolean): string {
-  const quality = vmafAvailable && result.vmafMean !== null
-    ? `VMAF ${result.vmafMean.toFixed(1)}`
-    : result.dssimMean !== null
-      ? `DSSIM ${result.dssimMean.toFixed(5)}`
-      : "no quality data";
-  return ` ${quality}, ${formatSize(result.fileSize)}, ${formatTime(result.encodingTimeMs)}`;
-}
-
-// ─────────────────────────────────────────────
-// CLI flags
-// ─────────────────────────────────────────────
-
-const FAST_MODE = process.argv.includes("--fast");
-const PARALLEL_MODE = process.argv.includes("--parallel");
-
-const FAST_FIXTURES = new Set([
-  "big-buck-bunny", "jellyfish", "candle-flame", "screencast", "talking-head", "skin-tones",
-]);
-const FAST_ENCODERS = new Set(
-  RESOLUTIONS.flatMap(({ suffix }) => [`gifski${suffix}`, `gifhero-balanced${suffix}`, `gifhero-quality${suffix}`]),
-);
-
-// ─────────────────────────────────────────────
-// Main
-// ─────────────────────────────────────────────
+// ── Main ──
 
 async function main() {
-  console.log("");
-  console.log("━━━ gifhero benchmark ━━━");
-  if (FAST_MODE) console.log("  ⚡ Fast mode: subset of fixtures and encoders, no TFS/DSSIM");
-  if (PARALLEL_MODE) console.log("  ⚠ Parallel mode: timing values are not comparable");
-  console.log("");
+  // Parse config
+  const allFixtures = getAllFixtures();
+  const PARALLEL_MODE = hasFlag("parallel");
+  const FAST_MODE = hasFlag("fast");
 
-  // Clean / create temp and results dirs
-  mkdirSync(TEMP_DIR, { recursive: true });
-  mkdirSync(RESULTS_DIR, { recursive: true });
+  let fixtureArg = parseArg("fixtures", "");
+  let fixtures = fixtureArg ? fixtureArg.split(",") : allFixtures;
+  if (FAST_MODE && !fixtureArg) fixtures = fixtures.filter(f => FAST_FIXTURES.has(f));
 
-  // Detect tools
-  const ffmpegOk = hasCommand("ffmpeg");
-  const vmafOk = ffmpegOk && hasVmafSupport();
+  const resArg = parseArg("resolutions", "480,360,240,160");
+  const resolutions = resArg.split(",").map(Number);
+
+  const encoderArg = parseArg("encoders", "");
+  let requestedEncoders = encoderArg ? encoderArg.split(",") : Object.keys(ALL_ENCODERS);
+  if (FAST_MODE && !encoderArg)
+    requestedEncoders = requestedEncoders.filter(n => n.startsWith("gifhero") || n.startsWith("gifski"));
+  const availableEncoders = requestedEncoders.filter(n => ALL_ENCODERS[n]?.available());
+
+  const defaultMetrics = FAST_MODE ? "vmaf,ssim,psnr,ciede,cambi" : "vmaf,ssim,psnr,ciede,cambi,dssim,tfs";
+  const metricArg = parseArg("metrics", defaultMetrics);
+  const enabledMetrics = new Set(metricArg.split(","));
+
+  const baseDir = parseArg("out-dir", join(__dirname, "results"));
+  const runId = new Date().toISOString().slice(0, 16).replace("T", "-").replace(":", "");
+  const runDir = join(baseDir, runId);
+  const gifsDir = join(runDir, "gifs");
+  const latestLink = join(baseDir, "latest");
+
+  // --list mode
+  if (hasFlag("list")) {
+    console.log("\nAvailable fixtures:");
+    for (const f of allFixtures) {
+      const count = readdirSync(join(FIXTURES_DIR, f)).filter(f => f.endsWith(".png")).length;
+      console.log(`  ${f} (${count} frames)`);
+    }
+    console.log("\nAvailable encoders:");
+    for (const [name, enc] of Object.entries(ALL_ENCODERS)) {
+      console.log(`  ${name}: ${enc.available() ? "available" : "NOT available"}`);
+    }
+    console.log("\nAvailable metrics: vmaf, ssim, psnr, ciede, cambi, dssim, tfs");
+    return;
+  }
+
+  // Validate
+  for (const f of fixtures) {
+    if (!existsSync(join(FIXTURES_DIR, f))) {
+      console.error(`Fixture not found: ${f}`);
+      process.exit(1);
+    }
+  }
+  for (const e of requestedEncoders) {
+    if (!ALL_ENCODERS[e]) {
+      console.error(`Unknown encoder: ${e}. Use --list to see available.`);
+      process.exit(1);
+    }
+  }
+
+  const vmafOk = hasVmafSupport();
   const dssimOk = isDssimAvailable();
-  const gifsicleOk = hasCommand("gifsicle");
-  const gifskiOk = hasCommand("gifski");
+  const TEMP_DIR = join(__dirname, ".tmp");
 
-  console.log(`  ffmpeg:   ${ffmpegOk ? "available" : "not installed"}`);
-  console.log(
-    `  VMAF:     ${vmafOk
-      ? "available (ffmpeg with libvmaf)"
-      : "⚠ VMAF not available (ffmpeg not built with libvmaf), falling back to DSSIM only"}`
-  );
-  console.log(`  dssim:    ${dssimOk ? "available" : "not installed (brew install dssim)"}`);
-  console.log(`  gifski:   ${gifskiOk ? "available" : "not installed"}`);
-  console.log(`  gifsicle: ${gifsicleOk ? "available" : "not installed"}`);
+  mkdirSync(TEMP_DIR, { recursive: true });
+  mkdirSync(gifsDir, { recursive: true });
+  const logsDir = join(TEMP_DIR, "logs"); mkdirSync(logsDir, { recursive: true });
+  const framesExtractDir = join(TEMP_DIR, "frames"); mkdirSync(framesExtractDir, { recursive: true });
 
-  let fixtures = getFixtures();
-  if (fixtures.length === 0) {
-    console.error("No fixtures found. Run: npm run bench:setup");
-    process.exit(1);
-  }
-  if (FAST_MODE) fixtures = fixtures.filter((f) => FAST_FIXTURES.has(f));
+  const totalJobs = fixtures.length * resolutions.length * availableEncoders.length;
 
-  // Detect available encoders
-  let available = Object.entries(encoders)
-    .filter(([, e]) => e.available())
-    .map(([name]) => name);
-  if (FAST_MODE) available = available.filter((n) => FAST_ENCODERS.has(n));
-
-  const runDssim = dssimOk && !FAST_MODE;
-
-  console.log("");
-  console.log(`  Fixtures: ${fixtures.join(", ")}`);
-  console.log(`  Encoders: ${available.length > 0 ? available.join(", ") : "none found!"}`);
-
-  if (available.length === 0) {
-    console.error("Install at least one: brew install gifski ffmpeg gifsicle");
-    process.exit(1);
-  }
-
+  console.log("\n━━━ gifhero benchmark ━━━\n");
+  if (FAST_MODE) console.log("  Fast mode: subset of fixtures and encoders, no DSSIM/TFS");
+  if (PARALLEL_MODE) console.log("  Parallel mode: gifhero encoding via worker threads");
+  console.log(`  Fixtures:     ${fixtures.join(", ")}`);
+  console.log(`  Resolutions:  ${resolutions.map(r => r + "p").join(", ")}`);
+  console.log(`  Encoders:     ${availableEncoders.join(", ")}`);
+  console.log(`  Metrics:      ${[...enabledMetrics].join(", ")}`);
+  console.log(`  Output:       ${runDir}`);
+  console.log(`  Total jobs:   ${totalJobs}`);
+  console.log(`  VMAF: ${vmafOk ? "yes" : "no"}  DSSIM: ${dssimOk ? "yes" : "no"}`);
   console.log("");
 
-  // Run benchmarks
-  const allResults: EncoderResult[] = [];
+  const results: any[] = [];
+  let completed = 0;
 
-  const gifheroEncoderNames = available.filter((n) => n.startsWith("gifhero"));
-  const externalEncoders = available.filter((n) => !n.startsWith("gifhero"));
+  // Helper: collect metrics for a GIF that's already been encoded
+  function collectMetrics(
+    r: any, outputPath: string, srcDir: string, outW: number, outH: number,
+    srcW: number, srcH: number, frameCount: number,
+  ) {
+    const inspection = inspectGif(outputPath, outW, outH);
+    if (inspection) r.gif = inspection;
 
-  if (PARALLEL_MODE) {
-    const gifsDir = join(TEMP_DIR, "gifs");
-    mkdirSync(gifsDir, { recursive: true });
-
-    // 1a. Batch ALL gifhero variants in one encodeParallel call
-    // (fixtures × resolutions jobs, all 16 workers simultaneously)
-    if (gifheroEncoderNames.length > 0) {
-      console.log(`  Phase 1a: Encoding gifhero (${gifheroEncoderNames.length} variants × ${fixtures.length} fixtures = ${gifheroEncoderNames.length * fixtures.length} jobs)...`);
-
-      const allJobs: EncodeJob[] = [];
-      const jobLabels: Array<{ fixture: string; encoder: string }> = [];
-
-      // Load each fixture once, create jobs for all resolutions
-      for (const fixture of fixtures) {
-        const framesDir = join(FIXTURES_DIR, fixture);
-        const loaded = loadPngFrames(framesDir);
-
-        for (const encoderName of gifheroEncoderNames) {
-          const isQualityPreset = encoderName.startsWith("gifhero-quality");
-          const suffix = isQualityPreset
-            ? encoderName.replace("gifhero-quality", "")
-            : encoderName.replace("gifhero-balanced", "");
-          const res = RESOLUTIONS.find((r) => r.suffix === suffix);
-          const tw = res?.targetWidth && res.targetWidth < loaded.width
-            ? res.targetWidth : undefined;
-
-          allJobs.push({
-            frames: loaded.frames.map((f) => ({ data: f.data, delay: f.delay })),
-            width: loaded.width, height: loaded.height,
-            options: {
-              preset: (isQualityPreset ? "quality" : "balanced") as any,
-              ...(tw ? { targetWidth: tw } : {}),
-            },
-          });
-          jobLabels.push({ fixture, encoder: encoderName });
-        }
-      }
-
-      const gifs = await encodeParallel(allJobs, 16, (done, total) => {
-        process.stdout.write(`\r    gifhero: ${done}/${total} jobs`);
-      });
-      console.log("");
-
-      for (let j = 0; j < gifs.length; j++) {
-        const { fixture, encoder } = jobLabels[j];
-        writeFileSync(join(gifsDir, `${fixture}-${encoder}.gif`), gifs[j]);
-      }
+    const extractDir = join(framesExtractDir, `${r.fixture}-${r.resolution}-${r.encoder}`);
+    let framesExtracted = false;
+    if (enabledMetrics.has("dssim") || enabledMetrics.has("tfs")) {
+      try { extractGifFrames(outputPath, extractDir); framesExtracted = true; } catch {}
     }
 
-    // 1b. Batch ALL external encoders via parallel shell commands
-    if (externalEncoders.length > 0) {
-      console.log(`  Phase 1b: Encoding external (${externalEncoders.length} variants × ${fixtures.length} fixtures)...`);
+    const needsVmaf = ["vmaf", "ssim", "psnr", "ciede", "cambi"].some(m => enabledMetrics.has(m));
+    if (needsVmaf && vmafOk) {
+      try {
+        const vm = computeVmafMetrics(srcDir, outputPath, outW, outH, logsDir);
+        if (enabledMetrics.has("vmaf")) { r.vmafMean = vm.vmafMean; r.vmafMin = vm.vmafMin; }
+        if (enabledMetrics.has("ssim")) r.ssimMean = vm.ssim;
+        if (enabledMetrics.has("psnr")) r.psnrMean = vm.psnr;
+        if (enabledMetrics.has("ciede")) r.ciede2000 = vm.ciede;
+        if (enabledMetrics.has("cambi")) r.cambiBanding = vm.cambi;
+      } catch {}
+    }
 
-      // Run 8 concurrent gifski/ffmpeg processes at a time
-      const extCmds: Array<{ fixture: string; encoder: string; cmd: string; outputPath: string }> = [];
+    if (enabledMetrics.has("dssim") && dssimOk && framesExtracted) {
+      try {
+        const extPngs = readdirSync(extractDir).filter(f => f.endsWith(".png")).sort();
+        if (extPngs.length > 0) {
+          const extImg = new Image();
+          extImg.src = readFileSync(join(extractDir, extPngs[0]));
+          const needsScale = extImg.width !== srcW || extImg.height !== srcH;
+          const d = needsScale
+            ? dssimFrames(srcDir, extractDir, extImg.width, extImg.height)
+            : dssimFrames(srcDir, extractDir);
+          r.dssimMean = d.mean; r.dssimMax = d.max; r.dssimP95 = d.p95;
+        }
+      } catch {}
+    }
+
+    if (enabledMetrics.has("tfs") && framesExtracted && frameCount >= 2) {
+      try {
+        const srcPngs = readdirSync(srcDir).filter(f => f.endsWith(".png")).sort();
+        const extPngs = readdirSync(extractDir).filter(f => f.endsWith(".png")).sort();
+        if (extPngs.length > 0) {
+          const extImg = new Image(); extImg.src = readFileSync(join(extractDir, extPngs[0]));
+          const tw = extImg.width, th = extImg.height;
+          const count = Math.min(srcPngs.length, extPngs.length);
+          const srcFrames: Uint8ClampedArray[] = [], encFrames: Uint8ClampedArray[] = [];
+          for (let i = 0; i < count; i++) {
+            const s = new Image(); s.src = readFileSync(join(srcDir, srcPngs[i]));
+            const sc = createCanvas(tw, th); sc.getContext("2d").drawImage(s, 0, 0, tw, th);
+            srcFrames.push(sc.getContext("2d").getImageData(0, 0, tw, th).data);
+            const e = new Image(); e.src = readFileSync(join(extractDir, extPngs[i]));
+            const ec = createCanvas(tw, th); ec.getContext("2d").drawImage(e, 0, 0, tw, th);
+            encFrames.push(ec.getContext("2d").getImageData(0, 0, tw, th).data);
+          }
+          r.flickerScore = computeFlickerScore(srcFrames, encFrames, tw, th).score;
+        }
+      } catch {}
+    }
+
+    const sizeKB = (r.fileSize / 1024).toFixed(0);
+    const vmafStr = r.vmafMean != null ? `VMAF ${r.vmafMean.toFixed(1)}` : "";
+    const subInfo = inspection
+      ? `sub:${inspection.subFrameCount}/${inspection.frameCount} cov:${(inspection.avgSubFrameCoverage * 100).toFixed(0)}% pal:${inspection.minPaletteSize}-${inspection.maxPaletteSize} bpp:${inspection.bitsPerPixel} ${inspection.effectiveFps}fps`
+      : "";
+    completed++;
+    console.log(`    ${r.encoder}: ${sizeKB} KB, ${vmafStr ? vmafStr + ", " : ""}${r.encodingTimeMs}ms, ${subInfo} [${completed}/${totalJobs}]`);
+  }
+
+  if (PARALLEL_MODE) {
+    // Phase 1: Parallel gifhero encoding via worker threads
+    const gifheroEncoders = availableEncoders.filter(n => n.startsWith("gifhero"));
+    const externalEncoders = availableEncoders.filter(n => !n.startsWith("gifhero"));
+
+    if (gifheroEncoders.length > 0) {
+      const allJobs: EncodeJob[] = [];
+      const jobMeta: Array<{ fixture: string; encoder: string; srcDir: string; outputPath: string;
+        res: number; resSuffix: string; outW: number; outH: number; srcW: number; srcH: number; frameCount: number }> = [];
+
       for (const fixture of fixtures) {
-        const framesDir = join(FIXTURES_DIR, fixture);
-        for (const encoderName of externalEncoders) {
-          const outputPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
-          const res = RESOLUTIONS.find((r) => encoderName === `gifski${r.suffix}`);
-          if (res && encoderName.startsWith("gifski")) {
-            const widthFlag = res.targetWidth ? `--width ${res.targetWidth} ` : "";
-            extCmds.push({
-              fixture, encoder: encoderName, outputPath,
-              cmd: `gifski --fps 20 ${widthFlag}-o "${outputPath}" "${framesDir}"/*.png 2>/dev/null`,
+        const srcDir = join(FIXTURES_DIR, fixture);
+        const loaded = loadPngFrames(srcDir);
+        const frameCount = loaded.frames.length;
+
+        for (const res of resolutions) {
+          const resSuffix = `-${res}p`;
+          const outW = res < loaded.width ? res : loaded.width;
+          const outH = res < loaded.width ? Math.round(loaded.height * outW / loaded.width) : loaded.height;
+
+          for (const encName of gifheroEncoders) {
+            const tw = res < loaded.width ? res : undefined;
+            allJobs.push({
+              frames: loaded.frames.map(f => ({ data: f.data, delay: f.delay })),
+              width: loaded.width, height: loaded.height,
+              options: { preset: "balanced" as any, lossyLzw: 0, ...(tw ? { targetWidth: tw } : {}) },
+            });
+            jobMeta.push({
+              fixture, encoder: encName, srcDir,
+              outputPath: join(gifsDir, `${fixture}${resSuffix}-${encName}.gif`),
+              res, resSuffix, outW, outH, srcW: loaded.width, srcH: loaded.height, frameCount,
             });
           }
         }
       }
 
-      for (let batch = 0; batch < extCmds.length; batch += 8) {
-        const slice = extCmds.slice(batch, batch + 8);
-        const shellCmd = slice.map((c) => c.cmd + " &").join("\n") + "\nwait";
-        try {
-          execSync(shellCmd, { shell: "/bin/bash", timeout: 300000, stdio: "ignore" });
-        } catch {}
-        process.stdout.write(`\r    external: ${Math.min(batch + 8, extCmds.length)}/${extCmds.length}`);
+      console.log(`  Phase 1: Encoding ${allJobs.length} gifhero jobs in parallel...`);
+      const t0 = performance.now();
+      const gifs = await encodeParallel(allJobs, 16, (done, total) => {
+        process.stdout.write(`\r    gifhero: ${done}/${total} jobs`);
+      });
+      console.log(`\n    Done in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
+
+      for (let i = 0; i < gifs.length; i++) {
+        const m = jobMeta[i];
+        writeFileSync(m.outputPath, gifs[i]);
+        const fileSize = gifs[i].byteLength;
+        const hash = bufHash(gifs[i]);
+        const r: any = {
+          fixture: m.fixture, resolution: `${m.res}p`,
+          encoder: m.encoder, fileSize, hash, encodingTimeMs: 0, frameCount: m.frameCount,
+          outputWidth: m.outW, outputHeight: m.outH,
+        };
+        collectMetrics(r, m.outputPath, m.srcDir, m.outW, m.outH, m.srcW, m.srcH, m.frameCount);
+        results.push(r);
       }
-      console.log("");
     }
 
-    // 2. Measure all metrics — VMAF in parallel batches via shell
-    console.log(`  Phase 2: Measuring metrics...`);
+    // Phase 2: External encoders sequentially (they spawn their own processes)
+    if (externalEncoders.length > 0) {
+      console.log(`  Phase 2: External encoders (${externalEncoders.join(", ")})...\n`);
+      for (const fixture of fixtures) {
+        const srcDir = join(FIXTURES_DIR, fixture);
+        const frameCount = readdirSync(srcDir).filter(f => f.endsWith(".png")).length;
+        const firstImg = new Image();
+        firstImg.src = readFileSync(join(srcDir, readdirSync(srcDir).filter(f => f.endsWith(".png")).sort()[0]));
+        const srcW = firstImg.width, srcH = firstImg.height;
 
-    const allGifs: Array<{ fixture: string; encoder: string; gifPath: string; framesDir: string }> = [];
-    for (const fixture of fixtures) {
-      const framesDir = join(FIXTURES_DIR, fixture);
-      for (const encoderName of available) {
-        const gifPath = join(gifsDir, `${fixture}-${encoderName}.gif`);
-        if (existsSync(gifPath)) {
-          allGifs.push({ fixture, encoder: encoderName, gifPath, framesDir });
+        for (const res of resolutions) {
+          const resSuffix = `-${res}p`;
+          const targetWidth = res < srcW ? res : undefined;
+          const outW = res < srcW ? res : srcW;
+          const outH = res < srcW ? Math.round(srcH * outW / srcW) : srcH;
+
+          console.log(`  ${fixture}${resSuffix} (${frameCount} frames, ${outW}x${outH})`);
+          for (const encName of externalEncoders) {
+            const outputPath = join(gifsDir, `${fixture}${resSuffix}-${encName}.gif`);
+            const t0 = performance.now();
+            let encResult: EncodeResult | void;
+            try {
+              encResult = await ALL_ENCODERS[encName].encode(srcDir, outputPath, targetWidth);
+            } catch (err) {
+              console.log(`    ✗ ${encName}: FAILED — ${(err as Error).message}`);
+              continue;
+            }
+            const encTime = Math.round(performance.now() - t0);
+            if (!existsSync(outputPath)) { console.log(`    ✗ ${encName}: no output`); continue; }
+            const fileSize = statSync(outputPath).size;
+            const hash = fileHash(outputPath);
+            const r: any = {
+              fixture, resolution: `${res}p`,
+              encoder: encName, fileSize, hash, encodingTimeMs: encTime, frameCount,
+              outputWidth: outW, outputHeight: outH,
+              ...(encResult?.timing ? { timing: encResult.timing } : {}),
+            };
+            collectMetrics(r, outputPath, srcDir, outW, outH, srcW, srcH, frameCount);
+            results.push(r);
+          }
         }
       }
     }
-
-    // VMAF in batches of 8 concurrent ffmpeg processes
-    const logsDir = join(TEMP_DIR, "logs");
-    mkdirSync(logsDir, { recursive: true });
-
-    if (vmafOk) {
-      for (let batch = 0; batch < allGifs.length; batch += 8) {
-        const slice = allGifs.slice(batch, batch + 8);
-        const cmds = slice.map((g) => {
-          const fc = countFrames(g.framesDir);
-          if (fc < 2) return "true";
-          const first = new Image();
-          first.src = readFileSync(join(g.framesDir, readdirSync(g.framesDir).filter(f => f.endsWith(".png")).sort()[0]));
-          const w = first.width, h = first.height;
-          const logPath = join(logsDir, `${g.fixture}-${g.encoder}-vmaf.json`);
-          return `ffmpeg -y -framerate 20 -i "${g.framesDir}/%04d.png" -r 20 -i "${g.gifPath}" ` +
-            `-filter_complex "[1:v]scale=${w}:${h}:flags=bicubic[dist];` +
-            `[0:v]split=3[r1][r2][r3];[dist]split=3[d1][d2][d3];` +
-            `[r1][d1]libvmaf=log_path=${logPath}:log_fmt=json:feature=name=ciede;` +
-            `[r2][d2]ssim;[r3][d3]psnr" -f null - 2>/dev/null &`;
-        });
-        try {
-          execSync(cmds.join("\n") + "\nwait", { shell: "/bin/bash", timeout: 600000, stdio: "ignore" });
-        } catch {}
-        process.stdout.write(`\r    VMAF: ${Math.min(batch + 8, allGifs.length)}/${allGifs.length}`);
-      }
-      console.log("");
-    }
-
-    // 3. Collect all results
-    for (const g of allGifs) {
-      const fileSize = statSync(g.gifPath).size;
-      const frameCount = countFrames(g.framesDir);
-
-      let vmafMean: number | null = null;
-      let vmafMin: number | null = null;
-      let ciede2000: number | null = null;
-      let ssimMean: number | null = null;
-      let psnrMean: number | null = null;
-      const logPath = join(logsDir, `${g.fixture}-${g.encoder}-vmaf.json`);
-      if (existsSync(logPath)) {
-        try {
-          const data = JSON.parse(readFileSync(logPath, "utf-8"));
-          vmafMean = data.pooled_metrics?.vmaf?.mean ?? null;
-          vmafMin = data.pooled_metrics?.vmaf?.min ?? null;
-          ciede2000 = data.pooled_metrics?.ciede2000?.mean ?? null;
-        } catch {}
-      }
-
-      // CAMBI (quick, single-GIF no-reference)
-      let cambiBanding: number | null = null;
-      if (vmafOk) {
-        const cambiLog = join(logsDir, `${g.fixture}-${g.encoder}-cambi.json`);
-        try {
-          execSync(
-            `ffmpeg -y -i "${g.gifPath}" ` +
-            `-filter_complex "[0:v]split[a][b];[a][b]libvmaf=feature=name=cambi:log_path=${cambiLog}:log_fmt=json" ` +
-            `-f null - 2>/dev/null`,
-            { timeout: 120000, stdio: "ignore" },
-          );
-          const d = JSON.parse(readFileSync(cambiLog, "utf-8"));
-          cambiBanding = d.pooled_metrics?.cambi?.mean ?? null;
-        } catch {}
-      }
-
-      // DSSIM
-      let dssimMean: number | null = null;
-      let dssimMax: number | null = null;
-      let dssimP95: number | null = null;
-      if (runDssim) {
-        const extractDir = join(TEMP_DIR, "frames", `${g.fixture}-${g.encoder}`);
-        try {
-          extractGifFrames(g.gifPath, extractDir);
-          const srcFiles = readdirSync(g.framesDir).filter((f: string) => f.endsWith(".png")).sort();
-          const srcImg = new Image();
-          srcImg.src = readFileSync(join(g.framesDir, srcFiles[0]));
-          const extFiles = readdirSync(extractDir).filter((f: string) => f.endsWith(".png")).sort();
-          const extImg = new Image();
-          extImg.src = readFileSync(join(extractDir, extFiles[0]));
-          const needsScale = srcImg.width !== extImg.width || srcImg.height !== extImg.height;
-          const d = needsScale
-            ? dssimFrames(g.framesDir, extractDir, extImg.width, extImg.height)
-            : dssimFrames(g.framesDir, extractDir);
-          dssimMean = d.mean; dssimMax = d.max; dssimP95 = d.p95;
-        } catch {}
-      }
-
-      const vmafPerMB = vmafMean !== null ? vmafMean / (fileSize / (1024 * 1024)) : null;
-
-      allResults.push({
-        encoder: g.encoder, fixture: g.fixture, fileSize,
-        encodingTimeMs: 0, frameCount, gifPath: g.gifPath,
-        vmafMean, vmafMin, cambiBanding, ciede2000,
-        ssimMean, psnrMean, dssimMean, dssimMax, dssimP95,
-        flickerScore: null, vmafPerMB,
-      });
-    }
-
-    console.log(`  Done — ${allResults.length} results collected.`);
 
   } else {
+    // Sequential mode
     for (const fixture of fixtures) {
-      const framesDir = join(FIXTURES_DIR, fixture);
-      console.log(`  Benchmarking: ${fixture} (${countFrames(framesDir)} frames)`);
+      const srcDir = join(FIXTURES_DIR, fixture);
+      const frameCount = readdirSync(srcDir).filter(f => f.endsWith(".png")).length;
+      const firstImg = new Image();
+      firstImg.src = readFileSync(join(srcDir, readdirSync(srcDir).filter(f => f.endsWith(".png")).sort()[0]));
+      const srcW = firstImg.width, srcH = firstImg.height;
 
-      for (const encoderName of available) {
-        process.stdout.write(`    ${encoderName}...`);
-        const result = await benchmarkEncoder(
-          encoderName, encoders[encoderName].encode,
-          fixture, framesDir, vmafOk, runDssim,
-        );
-        if (result) {
-          allResults.push(result);
-          console.log(oneLiner(result, vmafOk));
+      for (const res of resolutions) {
+        const resSuffix = `-${res}p`;
+        const targetWidth = res < srcW ? res : undefined;
+        const outW = res < srcW ? res : srcW;
+        const outH = res < srcW ? Math.round(srcH * outW / srcW) : srcH;
+
+        console.log(`  ${fixture}${resSuffix} (${frameCount} frames, ${outW}x${outH})`);
+
+        for (const encName of availableEncoders) {
+          const outputPath = join(gifsDir, `${fixture}${resSuffix}-${encName}.gif`);
+          const t0 = performance.now();
+          let encResult: EncodeResult | void;
+          try {
+            encResult = await ALL_ENCODERS[encName].encode(srcDir, outputPath, targetWidth);
+          } catch (err) {
+            console.log(`    ✗ ${encName}: FAILED — ${(err as Error).message}`);
+            continue;
+          }
+          const encTime = Math.round(performance.now() - t0);
+          if (!existsSync(outputPath)) { console.log(`    ✗ ${encName}: no output`); continue; }
+          const fileSize = statSync(outputPath).size;
+          const hash = fileHash(outputPath);
+          const r: any = {
+            fixture, resolution: `${res}p`,
+            encoder: encName, fileSize, hash, encodingTimeMs: encTime, frameCount,
+            outputWidth: outW, outputHeight: outH,
+            ...(encResult?.timing ? { timing: encResult.timing } : {}),
+          };
+          collectMetrics(r, outputPath, srcDir, outW, outH, srcW, srcH, frameCount);
+          results.push(r);
         }
       }
+      console.log("");
     }
   }
 
-  // Print comparison table
-  console.log("\n━━━ Results ━━━");
-  printTable(allResults, vmafOk);
+  // Save results
+  const outPath = join(runDir, "results.json");
+  writeFileSync(outPath, JSON.stringify({ timestamp: new Date().toISOString(), runId, config: {
+    fixtures, resolutions: resolutions.map(r => `${r}p`),
+    encoders: availableEncoders, metrics: [...enabledMetrics],
+  }, results }, null, 2));
 
-  // Save JSON report
-  const report: BenchmarkReport = {
-    timestamp: new Date().toISOString(),
-    gitCommit: getGitCommit(),
-    results: allResults.map(({ gifPath, ...rest }) => rest),
-  };
+  // Symlink latest -> this run
+  try { unlinkSync(latestLink); } catch {}
+  symlinkSync(runId, latestLink);
 
-  const reportName = `${new Date().toISOString().split("T")[0]}-${report.gitCommit || "dev"}.json`;
-  const reportPath = join(RESULTS_DIR, reportName);
-  writeFileSync(reportPath, JSON.stringify(report, null, 2));
-  writeFileSync(join(RESULTS_DIR, "latest.json"), JSON.stringify(report, null, 2));
+  console.log(`Results: ${runDir}`);
 
-  console.log(`\n  Report saved: ${reportPath}`);
+  // Print summary table
+  console.log("\n━━━ SUMMARY ━━━\n");
+  const cols = ["Fixture", "Res", "Encoder", "Size KB", "Time"];
+  if (enabledMetrics.has("vmaf")) cols.push("VMAF");
+  if (enabledMetrics.has("ssim")) cols.push("SSIM");
+  if (enabledMetrics.has("psnr")) cols.push("PSNR");
+  if (enabledMetrics.has("dssim")) cols.push("DSSIM");
+  if (enabledMetrics.has("tfs")) cols.push("TFS");
 
-  // Copy gifhero and gifski output GIFs to references/
-  const refsDir = join(__dirname, "references");
-  mkdirSync(refsDir, { recursive: true });
-  for (const r of allResults) {
-    if ((r.encoder.startsWith("gifhero") || r.encoder.startsWith("gifski")) && existsSync(r.gifPath)) {
-      const dest = join(refsDir, `${r.fixture}-${r.encoder}.gif`);
-      try { writeFileSync(dest, readFileSync(r.gifPath)); } catch {}
-    }
+  for (const r of results) {
+    const parts = [
+      r.fixture.padEnd(17),
+      (r.resolution as string).padStart(6),
+      r.encoder.padEnd(17),
+      (r.fileSize / 1024).toFixed(0).padStart(7),
+      (r.encodingTimeMs < 1000 ? r.encodingTimeMs + "ms" : (r.encodingTimeMs/1000).toFixed(1) + "s").padStart(7),
+    ];
+    if (enabledMetrics.has("vmaf")) parts.push((r.vmafMean?.toFixed(1) ?? "N/A").padStart(5));
+    if (enabledMetrics.has("ssim")) parts.push((r.ssimMean?.toFixed(4) ?? "N/A").padStart(6));
+    if (enabledMetrics.has("psnr")) parts.push((r.psnrMean?.toFixed(1) ?? "N/A").padStart(5));
+    if (enabledMetrics.has("dssim")) parts.push((r.dssimMean?.toFixed(4) ?? "N/A").padStart(6));
+    if (enabledMetrics.has("tfs")) parts.push((r.flickerScore?.toFixed(4) ?? "N/A").padStart(6));
+    console.log(parts.join(" | "));
   }
 
-  // Cleanup temp dir (extracted frames, logs) but references are kept
-  try {
-    // Keep GIFs for visual inspection
-    // rmSync(TEMP_DIR, { recursive: true, force: true });
-  } catch {}
-
-  console.log("");
+  // Cleanup temp files (extracted frames, VMAF logs)
+  rmSync(TEMP_DIR, { recursive: true, force: true });
 }
 
 main().catch(console.error);

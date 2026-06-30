@@ -158,6 +158,8 @@ export interface EncodeOptions {
   targetHeight?: number;
   /** Frame optimization settings. Omit or set false to disable all optimization. */
   optimize?: OptimizeOptions | false;
+  /** Pass a mutable object to collect per-stage timing (ms). Populated by encode(). */
+  timing?: Record<string, number>;
 }
 
 // ── Presets ───────────────────────────────────────────────────────
@@ -226,7 +228,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
   balanced: {
     quantizer: "imagequant",
     quantizerQuality: 95,
-    quantizerSpeed: 1,
+    quantizerSpeed: 4,
     maxColors: 256,
     palette: "crossframe",
     dither: "floyd-steinberg",
@@ -315,12 +317,15 @@ function resolveOptions(options: EncodeOptions): ResolvedOptions {
 export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   let { width, height } = options;
   let { frames } = options;
+  const t = options.timing;
+  let t0: number;
 
   if (frames.length === 0) {
     throw new Error("At least one frame is required");
   }
 
   // ── Downscale if requested (WASM Lanczos3) ──
+  t0 = performance.now();
   const srcWidth = width;
   if (options.targetWidth && options.targetWidth < width) {
     const dstW = options.targetWidth;
@@ -332,16 +337,13 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
     width = dstW;
     height = dstH;
   }
+  if (t) t.downscale = Math.round(performance.now() - t0);
   const downscaleRatio = srcWidth / width;
 
   const opts = resolveOptions(options);
 
   // ── Temporal denoise (balanced preset only) ──
-  // Smooths temporal noise for better compression. Skipped for the
-  // quality preset (which prioritizes VMAF) and for clean sources
-  // (rendered, synthetic) that have no sensor/compression noise.
-  // Detection: sub-perceptual changes (1-2 per channel) are noise;
-  // anti-aliasing and intentional changes are 3+.
+  t0 = performance.now();
   const presetName = options.preset ?? "balanced";
   if (presetName === "balanced" && frames.length >= 3) {
     const numPixels = width * height;
@@ -367,6 +369,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
       denoiseFrames(frames, width, height, 3);
     }
   }
+  if (t) t.denoise = Math.round(performance.now() - t0);
 
   // ── Phase 0: Drop near-duplicate frames ──
 
@@ -405,17 +408,20 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName);
+    const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName, t);
 
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
     const adaptiveLzw = options.lossyLzw !== undefined
       ? opts.lossyLzw
       : Math.min(5, Math.max(opts.lossyLzw, Math.round(opts.lossyLzw + lzwComplexity / 3000)));
 
-    return writeGif(gifFrames, {
+    t0 = performance.now();
+    const result = writeGif(gifFrames, {
       width, height, loop: opts.loop,
       lzwEncoder: buildLzwEncoder(adaptiveLzw, gifFrames),
     });
+    if (t) t.write = Math.round(performance.now() - t0);
+    return result;
   }
 
   // ── Legacy pipeline: quantize all → frame diff ──
@@ -442,16 +448,20 @@ async function encodeSubframePipeline(
   opts: ResolvedOptions,
   downscaleRatio: number = 1,
   presetName: string = "balanced",
+  t?: Record<string, number>,
 ): Promise<{ gifFrames: GifFrame[]; probe: ProbeResult }> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
   const canvasRgba = new Uint8ClampedArray(numPixels * 4);
+  let t0: number;
 
   // ── Pass 1: Probe ──
+  t0 = performance.now();
   const probe = probeFrames(
     frames.map((f) => f.data), width, height,
     opts.optimize.probeTolerance,
   );
+  if (t) t.probe = Math.round(performance.now() - t0);
 
   // ── Try background-aware quantizer ──
   let useGifQuant = false;
@@ -467,10 +477,7 @@ async function encodeSubframePipeline(
   }
 
   // ── Palette strategy + adaptive maxColors ──
-  // Per-frame palettes at native resolution for both presets.
-  // Shared palette only when downscaling (where per-frame palettes
-  // fragment transparency runs and hurt LZW) or explicitly requested.
-  // "quality" preset: maxColors capped at 224 for very high diversity.
+  t0 = performance.now();
   const isQuality = presetName === "quality";
   let sharedPalette: Uint8Array | null = null;
 
@@ -556,43 +563,101 @@ async function encodeSubframePipeline(
     ? opts.optimize.staleThreshold
     : autoThreshold;
 
+  if (t) t.palette = Math.round(performance.now() - t0);
+
   const sceneChangeSet = new Set(probe.sceneChanges);
 
+  // Palette fitness: mean max-channel distance from source pixels to
+  // nearest palette color. When this exceeds the threshold, the palette
+  // no longer represents the content well and needs rebuilding.
+  const PALETTE_FITNESS_THRESHOLD = 12;
+  const MAX_FRAMES_PER_PALETTE = 30;
+
+  function paletteFitness(rgba: Uint8ClampedArray, pal: Uint8Array): number {
+    const palCount = pal.length / 3;
+    const sampleStep = Math.max(1, Math.floor(numPixels / 2000));
+    let totalDist = 0, samples = 0;
+    for (let j = 0; j < numPixels; j += sampleStep) {
+      const si = j * 4;
+      const sr = rgba[si], sg = rgba[si + 1], sb = rgba[si + 2];
+      let bestDist = 765;
+      for (let p = 0; p < palCount; p++) {
+        const pi = p * 3;
+        const d = Math.abs(sr - pal[pi]) + Math.abs(sg - pal[pi + 1]) + Math.abs(sb - pal[pi + 2]);
+        if (d < bestDist) bestDist = d;
+      }
+      totalDist += bestDist;
+      samples++;
+    }
+    return samples > 0 ? totalDist / samples : 0;
+  }
+
+  let activePaletteRgba: Uint8Array | null = null;
+  let framesSincePalette = 0;
+
+  let tTransparency = 0, tQuantize = 0, tSubframe = 0;
+  t0 = performance.now();
   for (let i = 0; i < frames.length; i++) {
     const delay = Math.round((frames[i].delay ?? 100) / 10);
 
-    // ── Frame 0 or scene change: full-frame quantize, reset canvas ──
-    if (i === 0 || sceneChangeSet.has(i)) {
+    // Decide whether this frame needs full quantization or can remap
+    const isKeyframe = i === 0 || sceneChangeSet.has(i);
+    let needsFullQuantize = isKeyframe;
+    if (!isKeyframe && useGifQuant) {
+      if (!activePaletteRgba || framesSincePalette >= MAX_FRAMES_PER_PALETTE) {
+        needsFullQuantize = true;
+      } else {
+        const rgbPal = rgbaToRgbPalette(activePaletteRgba, activePaletteRgba.length / 4);
+        const fitness = paletteFitness(frames[i].data, rgbPal);
+        if (fitness > PALETTE_FITNESS_THRESHOLD) {
+          needsFullQuantize = true;
+        }
+      }
+    }
+
+    // ── Keyframe or palette stale: full-frame quantize, reset canvas ──
+    if (isKeyframe || needsFullQuantize) {
       let indexed: Uint8Array, palette: Uint8Array;
 
-      if (useGifQuant) {
-        const r = gifQuantSimple(
-          frames[i].data, width, height,
-          opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
-        );
-        palette = rgbaToRgbPalette(r.palette, r.paletteCount);
-        indexed = r.indexed;
-      } else if (globalPalette) {
-        palette = globalPalette;
-        indexed = opts.dither === "floyd-steinberg"
-          ? floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine)
-          : mapNearest(frames[i].data, palette);
-      } else {
-        ({ indexed, palette } = await quantizeFrame(
-          frames[i].data, width, height, opts, neuquantPalettes?.[i],
-        ));
+      if (isKeyframe) {
+        // Frame 0 / scene change: build shared palette, remap frame against it
+        if (useGifQuant) {
+          const sampleFrames: Uint8ClampedArray[] = [frames[i].data];
+          for (let s = 1; s <= 3 && i + s < frames.length; s++) sampleFrames.push(frames[i + s].data);
+          activePaletteRgba = gifBuildPalette(
+            sampleFrames, width, height,
+            opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+          );
+          const emptyCanvas = new Uint8ClampedArray(numPixels * 4);
+          const r = gifRemapPalette(frames[i].data, width, height, activePaletteRgba, emptyCanvas);
+          palette = rgbaToRgbPalette(r.palette, r.paletteCount);
+          indexed = r.indexed;
+        } else if (globalPalette) {
+          palette = globalPalette;
+          indexed = opts.dither === "floyd-steinberg"
+            ? floydSteinberg(frames[i].data, width, height, palette, opts.ditherSerpentine)
+            : mapNearest(frames[i].data, palette);
+        } else {
+          ({ indexed, palette } = await quantizeFrame(
+            frames[i].data, width, height, opts, neuquantPalettes?.[i],
+          ));
+        }
+
+        const trimmed = trimPalette(palette, indexed);
+        indexed = trimmed.indexed;
+        palette = trimmed.palette;
+
+        gifFrames[i] = {
+          indexedPixels: indexed, palette, width, height,
+          delay, disposal: 0,
+        };
+        decodeFrameToCanvas(canvasRgba, indexed, palette, width, height);
+        framesSincePalette = 0;
+        continue;
       }
 
-      const trimmed = trimPalette(palette, indexed);
-      indexed = trimmed.indexed;
-      palette = trimmed.palette;
-
-      gifFrames[i] = {
-        indexedPixels: indexed, palette, width, height,
-        delay, disposal: 0,
-      };
-      decodeFrameToCanvas(canvasRgba, indexed, palette, width, height);
-      continue;
+      // Non-keyframe but palette stale: full quantize with background
+      // (falls through to the background-aware path below with forced rebuild)
     }
 
     // ── Frames 1+: background-aware path ──
@@ -600,7 +665,7 @@ async function encodeSubframePipeline(
     const curr = frames[i].data;
 
     if (useGifQuant) {
-      // Zero alpha on static pixels
+      let ts = performance.now();
       const inputRgba = new Uint8ClampedArray(curr);
       for (let j = 0; j < numPixels; j++) {
         if (probe.staticMask[j]) {
@@ -681,14 +746,28 @@ async function encodeSubframePipeline(
         }
       }
 
-      const r = sharedPalette
-        ? gifRemapPalette(inputRgba, width, height, sharedPalette, canvasRgba)
-        : gifQuantBg(
-            inputRgba, width, height,
-            canvasRgba, importanceMap,
-            opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
-          );
+      tTransparency += performance.now() - ts;
+      ts = performance.now();
+      let r: GifQuantResult;
+      if (sharedPalette) {
+        r = gifRemapPalette(inputRgba, width, height, sharedPalette, canvasRgba);
+      } else if (needsFullQuantize || !activePaletteRgba) {
+        // Rebuild palette from nearby frames for better segment coverage
+        const sampleFrames: Uint8ClampedArray[] = [frames[i].data];
+        for (let s = 1; s <= 3 && i + s < frames.length; s++) sampleFrames.push(frames[i + s].data);
+        activePaletteRgba = gifBuildPalette(
+          sampleFrames, width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+        );
+        r = gifRemapPalette(inputRgba, width, height, activePaletteRgba, canvasRgba);
+        framesSincePalette = 0;
+      } else {
+        r = gifRemapPalette(inputRgba, width, height, activePaletteRgba, canvasRgba);
+      }
+      framesSincePalette++;
 
+      tQuantize += performance.now() - ts;
+      ts = performance.now();
       const tIdx = r.transparentIndex;
       const rgbPal = rgbaToRgbPalette(r.palette, r.paletteCount);
 
@@ -752,6 +831,7 @@ async function encodeSubframePipeline(
           canvasRgba[ci + 3] = 255;
         }
       }
+      tSubframe += performance.now() - ts;
 
       continue;
     }
@@ -845,6 +925,11 @@ async function encodeSubframePipeline(
     };
 
     compositeOntoCanvas(canvasRgba, sub, palette, width);
+  }
+  if (t) {
+    t.transparency = Math.round(tTransparency);
+    t.quantize = Math.round(tQuantize);
+    t.subframe = Math.round(tSubframe);
   }
 
   return { gifFrames, probe };
