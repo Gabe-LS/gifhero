@@ -85,29 +85,35 @@ Source frames
   → Temporal denoise (balanced only, noise-aware gate)
   → Probe: static mask, motion × complexity, keyframes
   → Content-adaptive staleThreshold:
-      quality: base 4, motionFloor 4/5
-      balanced: base 5, per-frame boost (+1 on near-static frames)
-  → Content-adaptive lossyLzw:
-      adaptiveLzw = clamp(preset, 5, round(preset + complexity / 3000))
+      balanced: min(8, max(2, round(4 + 4 × min(1, complexity/8000))))
+      quality: min(10, max(2, round(4 + 6 × min(1, complexity/5000))))
+      (complexity = motionLevel × colorComplexity)
   → Adaptive maxColors:
       quality: 224 when colorComplexity ≥ 30K
       balanced: 192 when colorComplexity ≥ 20K
-  → Shared palette via Histogram (if downscaling OR colorComplexity ≥ 8000)
+  → Palette fitness model:
+      Build shared palette via gifBuildPalette at keyframes
+      Remap subsequent frames via gifRemapPalette (fast path)
+      Rebuild when palette fitness degrades (mean nearest-color distance > 12)
+      or after 30 frames, whichever comes first
   → Deferred LZW clear code (continue matching when dictionary full)
   → Power-of-2 palette targeting (evict entries to cross bit boundary)
-  → Frame 0 / keyframes: quantizeSimple() → full-frame, reset canvas
+  → Frame 0 / keyframes: build palette from nearby frames, remap
   → Frames 1+:
       1. Zero alpha on static-mask pixels
       2. Zero alpha on pixels where source ≈ canvas (≤ staleThreshold)
-      3. quantizeWithBackground(frame, canvas, importanceMap)
+         with texture-aware threshold (smooth areas get lower threshold)
+         and direction-aware forward-look
+      3. Quantize or remap with background awareness
          → libimagequant natively produces transparent pixels
          → Dithering blends seamlessly with canvas via set_background
-         → Palette focused on changed pixels via importance map
-      4. Compute tight bbox of non-transparent pixels
-      5. Crop indexed output to bbox
-      6. Trim palette to used entries
-      7. Composite opaque pixels onto canvas for next frame
-  → Adaptive lossy LZW → GIF89a writer
+      4. Edge sparse suppression: suppress isolated near-stale pixels
+         in outermost 40% of bbox to shrink crop rectangle
+      5. Compute tight bbox of non-transparent pixels
+      6. Crop indexed output to bbox
+      7. Trim palette to used entries
+      8. Composite opaque pixels onto canvas for next frame
+  → LZW → GIF89a writer
 ```
 
 #### Fallback path (neuquant or when WASM unavailable)
@@ -223,14 +229,15 @@ Maximum VMAF and minimal posterization. Best for visual fidelity.
 
 ### balanced (default)
 Maximum compression with reduced posterization. Best for file size.
-- quantizer: imagequant (q95, speed 1)
+- quantizer: imagequant (q95, speed 4)
 - dither: floyd-steinberg (serpentine)
 - lossyLzw: 4 (adaptive up to 5)
-- staleThreshold: base 5, per-frame boost (+1 on near-static frames)
+- staleThreshold: content-adaptive, min(8, max(2, round(4 + 4 × min(1, complexity/8000))))
 - maxColors: 256 (192 when colorComplexity ≥ 20K)
 - Noise-aware temporal denoiser (3-frame median, threshold 3)
+- Palette fitness model: shared palette + remap, rebuild on drift
 
-Both presets share: conditional shared palette (colorComplexity ≥ 8K or downscaling), keyframe detection, Lanczos3 downscaling, deferred LZW clear, power-of-2 palette targeting.
+Both presets share: palette fitness model, keyframe detection, Lanczos3 downscaling, deferred LZW clear, power-of-2 palette targeting, edge sparse suppression.
 
 ## Encode Options
 
@@ -250,8 +257,8 @@ Key options beyond presets:
 - `npm run build` — build with tsup
 - `npm run test` — run vitest (52 tests)
 - `npm run bench` — full benchmark (25 fixtures × 4 resolutions)
-- `npm run bench:fast` — fast benchmark (6 fixtures × 4 encoders)
-- `npm run bench -- --parallel` — parallel mode (worker threads + batched VMAF)
+- `npm run bench:fast` — fast benchmark (6 fixtures, gifhero + gifski only)
+- `npm run bench:parallel` — parallel mode (worker threads for gifhero encoding)
 
 ### Building the WASM module
 ```bash
@@ -276,27 +283,16 @@ RUSTFLAGS="-C target-feature=+bulk-memory,+nontrapping-fptoint" \
 ### Parallel encoding
 Worker-thread parallelism via `test/bench/parallel.ts`. Each worker gets its own V8 isolate and WASM instance. Achieves 6× speedup on 16 cores.
 
-## Results vs gifski (25 fixtures × 4 resolutions)
+## Results vs gifski (25 fixtures × 4 resolutions, no lossy LZW)
 
-### quality preset (q98, VMAF-optimized)
+| Resolution | Size wins | VMAF wins | Avg VMAF Δ |
+|-----------|-----------|-----------|------------|
+| **480p** | **16/25** | **21/25** | **+1.8** |
+| **360p** | **16/25** | **22/25** | **+2.1** |
+| **240p** | **17/25** | **22/25** | **+2.4** |
+| **160p** | **18/25** | **21/25** | **+2.5** |
 
-| Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
-|-----------|-----------|-----------|------------|------------|
-| **480p** | **15/25** | **16/25** | **+0.5** | **-7%** |
-| **360p** | **18/25** | **18/25** | **+1.0** | **-5%** |
-| **240p** | **22/25** | **17/25** | **+2.2** | **-4%** |
-| **160p** | **21/25** | **17/25** | **+3.0** | **-4%** |
-
-### balanced preset (q95, size-optimized)
-
-| Resolution | VMAF wins | Size wins | Avg VMAF Δ | Total size Δ |
-|-----------|-----------|-----------|------------|------------|
-| **480p** | **10/25** | **22/25** | **+0.1** | **-14%** |
-| **360p** | **11/25** | **23/25** | **+0.3** | **-14%** |
-| **240p** | **16/25** | **24/25** | **+1.3** | **-14%** |
-| **160p** | **18/25** | **24/25** | **+2.0** | **-14%** |
-
-**Zero VMAF losses >2 points on either preset.**
+Smaller files on ~66% of fixtures with better VMAF on ~84%. On fixtures where gifski is smaller, gifhero almost always has higher VMAF.
 
 ## Current Phase
 Rust port complete. Two delivery targets from one pipeline:
@@ -316,10 +312,10 @@ Rust port complete. Two delivery targets from one pipeline:
 - In-browser benchmark comparing gifhero vs gifski-wasm vs gifski CLI
 
 ### Presets
-- **quality** (q98): maximum VMAF, lower staleThreshold, no denoiser
-- **balanced** (q95): maximum compression, higher staleThreshold, noise-aware temporal denoiser
+- **quality** (q98, speed 1): maximum VMAF, lower staleThreshold, no denoiser
+- **balanced** (q95, speed 4): maximum compression, content-adaptive staleThreshold, noise-aware temporal denoiser
 
-Shared pipeline features: conditional shared palette, adaptive lossyLzw (capped at 5), deferred LZW clear code, power-of-2 palette targeting, keyframe detection, WASM Lanczos3 downscaling, motion-adjusted staleThreshold.
+Shared pipeline features: palette fitness model (shared palette + fast remap), edge sparse suppression, deferred LZW clear code, power-of-2 palette targeting, keyframe detection, WASM Lanczos3 downscaling, content-adaptive staleThreshold.
 
 ### Rust ↔ TypeScript pipeline parity
 Validated across 25 fixtures × 4 resolutions × 2 presets = 200 comparisons:
