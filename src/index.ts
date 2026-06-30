@@ -408,7 +408,7 @@ export async function encode(options: EncodeOptions): Promise<Uint8Array> {
   // ── Sub-frame pipeline ──
 
   if (opts.optimize.subframe && frames.length > 1) {
-    const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName, t);
+    const { gifFrames, probe } = await encodeSubframePipeline(frames, width, height, opts, downscaleRatio, presetName, t, options);
 
     const lzwComplexity = probe.motionLevel * probe.colorComplexity;
     const adaptiveLzw = options.lossyLzw !== undefined
@@ -449,6 +449,7 @@ async function encodeSubframePipeline(
   downscaleRatio: number = 1,
   presetName: string = "balanced",
   t?: Record<string, number>,
+  rawOptions?: EncodeOptions,
 ): Promise<{ gifFrames: GifFrame[]; probe: ProbeResult }> {
   const numPixels = width * height;
   const gifFrames: GifFrame[] = new Array(frames.length);
@@ -555,13 +556,14 @@ async function encodeSubframePipeline(
       Math.round(4 + 6 * Math.min(1, complexity / 5000)) + motionAdjust,
     ));
   } else {
-    autoThreshold = Math.min(10, Math.max(2,
-      Math.round(5 + 5 * Math.min(1, complexity / 5000)) + motionAdjust,
+    autoThreshold = Math.min(8, Math.max(2,
+      Math.round(4 + 4 * Math.min(1, complexity / 8000)) + motionAdjust,
     ));
   }
-  const staleThreshold = opts.optimize.staleThreshold !== (isQuality ? 3 : 8)
-    ? opts.optimize.staleThreshold
-    : autoThreshold;
+  const userStale = rawOptions?.optimize && typeof rawOptions.optimize === "object"
+    && "staleThreshold" in rawOptions.optimize;
+  const staleThreshold = userStale ? opts.optimize.staleThreshold : autoThreshold;
+  if (t) t._staleThreshold = staleThreshold;
 
   if (t) t.palette = Math.round(performance.now() - t0);
 
