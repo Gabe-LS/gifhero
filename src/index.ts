@@ -466,24 +466,21 @@ async function encodeSubframePipeline(
     }
   }
 
-  // ── Shared palette + adaptive maxColors ──
-  // "quality" preset: per-frame palettes at native res for maximum VMAF,
-  //   maxColors capped at 224 only for very high color diversity (>= 30K).
-  // "balanced" preset: shared palette when colorComplexity >= 8K at native,
-  //   maxColors reduced to 192 at >= 20K for better compression.
+  // ── Palette strategy + adaptive maxColors ──
+  // Per-frame palettes at native resolution for both presets.
+  // Shared palette only when downscaling (where per-frame palettes
+  // fragment transparency runs and hurt LZW) or explicitly requested.
+  // "quality" preset: maxColors capped at 224 for very high diversity.
   const isQuality = presetName === "quality";
   let sharedPalette: Uint8Array | null = null;
 
   let adaptiveMaxColors = opts.maxColors;
-  if (!isQuality && probe.colorComplexity >= 20000) {
-    adaptiveMaxColors = Math.min(adaptiveMaxColors, 192);
-  } else if (isQuality && probe.colorComplexity >= 30000) {
+  if (isQuality && probe.colorComplexity >= 30000) {
     adaptiveMaxColors = Math.min(adaptiveMaxColors, 224);
   }
   if (useGifQuant && opts.palette !== "local" && (
     downscaleRatio > 1.0 ||
-    opts.palette === "global" ||
-    probe.colorComplexity >= 8000
+    opts.palette === "global"
   )) {
     const step = Math.max(1, Math.floor(frames.length / 10));
     const sampled: Uint8ClampedArray[] = [];
@@ -619,6 +616,32 @@ async function encodeSubframePipeline(
         ? Math.min(10, staleThreshold + 1)
         : staleThreshold;
 
+      // Texture map: local variance in 3×3 neighborhood. Smooth areas
+      // get a lower effective threshold (protecting gradients from
+      // ghosting), detailed areas keep the full threshold.
+      const texMap = new Uint8Array(numPixels);
+      for (let ty = 0; ty < height; ty++) {
+        for (let tx = 0; tx < width; tx++) {
+          let tmin = 765, tmax = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = ty + dy;
+            if (ny < 0 || ny >= height) continue;
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = tx + dx;
+              if (nx < 0 || nx >= width) continue;
+              const ti = (ny * width + nx) * 4;
+              const lum = inputRgba[ti] + inputRgba[ti + 1] + inputRgba[ti + 2];
+              if (lum < tmin) tmin = lum;
+              if (lum > tmax) tmax = lum;
+            }
+          }
+          texMap[ty * width + tx] = Math.min(255, tmax - tmin);
+        }
+      }
+
+      // Next frame source for direction-aware forward-look
+      const nextSrc = i < frames.length - 1 ? frames[i + 1].data : null;
+
       for (let j = 0; j < numPixels; j++) {
         if (inputRgba[j * 4 + 3] === 0) continue;
         const si = j * 4;
@@ -627,8 +650,34 @@ async function encodeSubframePipeline(
           Math.abs(inputRgba[si + 1] - canvasRgba[si + 1]),
           Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
         );
-        if (d <= frameThreshold) {
-          inputRgba[si + 3] = 0;
+
+        // Texture-scaled threshold: smooth areas (variance < 40) get
+        // 60–100% of the base threshold; detailed areas get full threshold
+        const tex = texMap[j];
+        const texFactor = 0.6 + 0.4 * Math.min(1, tex / 40);
+        const effectiveThreshold = frameThreshold * texFactor;
+
+        if (d <= effectiveThreshold) {
+          // Direction-aware forward-look: if this pixel is about to
+          // drift in the same direction next frame AND the area is
+          // smooth, keep it now to prevent ghost accumulation
+          let keepForward = false;
+          if (nextSrc && tex < 40 && d > 1) {
+            const fwdDiff = Math.max(
+              Math.abs(nextSrc[si] - canvasRgba[si]),
+              Math.abs(nextSrc[si + 1] - canvasRgba[si + 1]),
+              Math.abs(nextSrc[si + 2] - canvasRgba[si + 2]),
+            );
+            if (fwdDiff > 4) {
+              const dr = (inputRgba[si] - canvasRgba[si]) * (nextSrc[si] - canvasRgba[si]);
+              const dg = (inputRgba[si + 1] - canvasRgba[si + 1]) * (nextSrc[si + 1] - canvasRgba[si + 1]);
+              const db = (inputRgba[si + 2] - canvasRgba[si + 2]) * (nextSrc[si + 2] - canvasRgba[si + 2]);
+              if (dr + dg + db > 0) keepForward = true;
+            }
+          }
+          if (!keepForward) {
+            inputRgba[si + 3] = 0;
+          }
         }
       }
 
