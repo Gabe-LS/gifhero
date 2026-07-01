@@ -74,6 +74,7 @@
   footer td {
     padding: 5px 8px; border-bottom: 1px solid #eee; color: #555;
   }
+  footer .num { text-align: right; width: 90px; }
   footer tr.total td {
     border-top: 1px solid #ccc; border-bottom: none;
     font-weight: 600; color: #333;
@@ -103,12 +104,12 @@
 <footer>
   <p>Runs entirely client-side. Nothing is uploaded.</p>
   <table>
-    <thead><tr><th>Module</th><th>Gzipped</th><th>Raw</th><th>Contents</th></tr></thead>
+    <thead><tr><th>Module</th><th class="num">Gzipped</th><th class="num">Raw</th></tr></thead>
     <tbody>
-      <tr><td>Encoder</td><td>122 KB</td><td>347 KB</td><td>imagequant WASM, Lanczos3, LZW, sub-frame pipeline</td></tr>
-      <tr><td>Video worker</td><td>248 KB</td><td>1,042 KB</td><td>Mediabunny demuxer, VideoDecoder, frame extraction</td></tr>
-      <tr><td>HTML + CSS + JS</td><td>2 KB</td><td>5 KB</td><td>This page</td></tr>
-      <tr class="total"><td>Total</td><td>372 KB</td><td>1,394 KB</td><td></td></tr>
+      <tr><td>gifhero</td><td class="num">122 KB</td><td class="num">347 KB</td></tr>
+      <tr><td>Video worker</td><td class="num">248 KB</td><td class="num">1,042 KB</td></tr>
+      <tr><td>HTML</td><td class="num">2 KB</td><td class="num">5 KB</td></tr>
+      <tr class="total"><td>Total</td><td class="num">372 KB</td><td class="num">1,394 KB</td></tr>
     </tbody>
   </table>
   <p class="note">The video worker is only loaded when encoding from a video file.<br>Canvas/webcam/raw frame input uses the encoder alone (122 KB).</p>
