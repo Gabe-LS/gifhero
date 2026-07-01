@@ -34,24 +34,24 @@
   <text x="190" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">FILE SIZE (% of gifhero)</text>
 
   <text x="108" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
-  <rect x="115" y="89" width="74" height="18" rx="3" fill="url(#g1)"/>
-  <text x="195" y="102" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
+  <rect x="115" y="89" width="79" height="18" rx="3" fill="url(#g1)"/>
+  <text x="200" y="102" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
 
   <text x="108" y="130" text-anchor="end" font-size="11" fill="#4b5563">gifski</text>
-  <rect x="115" y="117" width="77" height="18" rx="3" fill="url(#g2)"/>
-  <text x="198" y="130" font-size="10" fill="#525252">104%</text>
+  <rect x="115" y="117" width="82" height="18" rx="3" fill="url(#g2)"/>
+  <text x="203" y="130" font-size="10" fill="#525252">104%</text>
 
   <text x="108" y="158" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg+gsc</text>
-  <rect x="115" y="145" width="124" height="18" rx="3" fill="url(#g2)"/>
-  <text x="245" y="158" font-size="10" fill="#525252">167%</text>
+  <rect x="115" y="145" width="131" height="18" rx="3" fill="url(#g2)"/>
+  <text x="252" y="158" font-size="10" fill="#525252">167%</text>
 
   <text x="108" y="186" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg</text>
-  <rect x="115" y="173" width="140" height="18" rx="3" fill="url(#g2)"/>
-  <text x="261" y="186" font-size="10" fill="#525252">189%</text>
+  <rect x="115" y="173" width="148" height="18" rx="3" fill="url(#g2)"/>
+  <text x="269" y="186" font-size="10" fill="#525252">189%</text>
 
   <text x="108" y="214" text-anchor="end" font-size="11" fill="#4b5563">magick</text>
-  <rect x="115" y="201" width="180" height="18" rx="3" fill="url(#g2)"/>
-  <text x="301" y="214" font-size="10" fill="#525252">243%</text>
+  <rect x="115" y="201" width="191" height="18" rx="3" fill="url(#g2)"/>
+  <text x="312" y="214" font-size="10" fill="#525252">243%</text>
 
   <text x="115" y="236" font-size="9" fill="#525252">&#x25C4; smaller is better</text>
 
