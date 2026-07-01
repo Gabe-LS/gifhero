@@ -44,6 +44,8 @@ gifski CLI is much faster (parallel quantization) but produces larger files on m
 
 ### Browser SDK
 
+125KB gzipped, self-contained (WASM embedded, no separate fetch needed). Works in browsers, workers, and Chrome extensions.
+
 ```bash
 npm install gifhero
 ```
