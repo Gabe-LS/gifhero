@@ -58,8 +58,25 @@
 
   footer {
     margin-top: auto; padding-top: 48px;
-    font-size: 0.75rem; color: #888; text-align: center;
-    line-height: 1.6;
+    font-size: 0.75rem; color: #666; text-align: center;
+    line-height: 1.6; width: 100%; max-width: 520px;
+  }
+  footer p { margin-bottom: 12px; }
+  footer .note { margin-top: 8px; color: #888; }
+  footer table {
+    width: 100%; border-collapse: collapse;
+    font-size: 0.75rem; text-align: left;
+  }
+  footer th {
+    padding: 6px 8px; border-bottom: 1px solid #ccc;
+    color: #444; font-weight: 600;
+  }
+  footer td {
+    padding: 5px 8px; border-bottom: 1px solid #eee; color: #555;
+  }
+  footer tr.total td {
+    border-top: 1px solid #ccc; border-bottom: none;
+    font-weight: 600; color: #333;
   }
 </style>
 </head>
@@ -84,8 +101,17 @@
 </div>
 
 <footer>
-  Runs entirely client-side. Nothing is uploaded.<br>
-  Page weight: 372 KB gzipped. Encoder: 122 KB (WASM included). Video demuxer: 248 KB. HTML: 1 KB.
+  <p>Runs entirely client-side. Nothing is uploaded.</p>
+  <table>
+    <thead><tr><th>Module</th><th>Gzipped</th><th>Raw</th><th>Contents</th></tr></thead>
+    <tbody>
+      <tr><td>Encoder</td><td>122 KB</td><td>347 KB</td><td>imagequant WASM, Lanczos3, LZW, sub-frame pipeline</td></tr>
+      <tr><td>Video worker</td><td>248 KB</td><td>1,042 KB</td><td>Mediabunny demuxer, VideoDecoder, frame extraction</td></tr>
+      <tr><td>HTML + CSS + JS</td><td>2 KB</td><td>5 KB</td><td>This page</td></tr>
+      <tr class="total"><td>Total</td><td>372 KB</td><td>1,394 KB</td><td></td></tr>
+    </tbody>
+  </table>
+  <p class="note">The video worker is only loaded when encoding from a video file.<br>Canvas/webcam/raw frame input uses the encoder alone (122 KB).</p>
 </footer>
 
 <script type="module">
