@@ -1,16 +1,16 @@
 /**
- * Local gifski encoding server for browser benchmark comparison.
+ * Browser benchmark server.
  *
  * Run: npx tsx test/browser/gifski-server.ts
- * Serves the test page AND provides /api/gifski endpoint.
+ * Open: http://localhost:3333/test/browser/
  *
- * POST /api/gifski
- *   Body: FormData with "video" (file), "fps" (string), "width" (string)
- *   Returns: GIF binary
+ * Provides /api/gifski and /api/gifhero endpoints for CLI comparison.
+ * Both endpoints extract frames with the same ffmpeg pipeline so the
+ * input is identical. Both encoders run at their default settings.
  */
 
 import { createServer } from "http";
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "fs";
 import { join, extname } from "path";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
@@ -41,65 +41,73 @@ function serveFile(url: string): { data: Buffer; mime: string } | null {
   }
 }
 
+function parseMultipart(body: Buffer, contentType: string) {
+  const boundaryMatch = contentType.match(/boundary=(.+)/);
+  if (!boundaryMatch) return null;
+
+  const boundary = boundaryMatch[1];
+  const parts = body.toString("binary").split(`--${boundary}`);
+  const fields: Record<string, string> = {};
+  let videoData: Buffer | null = null;
+  let fileExt = ".mp4";
+
+  for (const part of parts) {
+    if (part.includes('name="video"')) {
+      const headerEnd = part.indexOf("\r\n\r\n");
+      if (headerEnd < 0) continue;
+      const header = part.slice(0, headerEnd);
+      const filenameMatch = header.match(/filename="([^"]+)"/);
+      if (filenameMatch) fileExt = extname(filenameMatch[1]) || ".mp4";
+      const binaryData = part.slice(headerEnd + 4);
+      const trimmed = binaryData.endsWith("\r\n") ? binaryData.slice(0, -2) : binaryData;
+      videoData = Buffer.from(trimmed, "binary");
+    } else {
+      const nameMatch = part.match(/name="([^"]+)"/);
+      if (nameMatch) {
+        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
+        if (val) fields[nameMatch[1]] = val;
+      }
+    }
+  }
+
+  return { videoData, fileExt, fields };
+}
+
+function extractFrames(inputPath: string, framesDir: string, fps: string, width: string) {
+  // Extract frames at native resolution, capped at 20s.
+  // Both encoders handle their own downscaling to the target width.
+  execSync(
+    `ffmpeg -y -i "${inputPath}" -t 20 -vf "fps=${fps}" "${framesDir}/%04d.png"`,
+    { stdio: "ignore", timeout: 60000 },
+  );
+  return readdirSync(framesDir).filter(f => f.endsWith(".png")).length;
+}
+
 const server = createServer(async (req, res) => {
   // ── /api/gifski endpoint ──
   if (req.method === "POST" && req.url === "/api/gifski") {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
-    const body = Buffer.concat(chunks);
+    const parsed = parseMultipart(Buffer.concat(chunks), req.headers["content-type"] ?? "");
+    if (!parsed?.videoData) { res.writeHead(400); res.end("No video file"); return; }
 
-    // Parse multipart form data (simple parser)
-    const contentType = req.headers["content-type"] ?? "";
-    const boundaryMatch = contentType.match(/boundary=(.+)/);
-    if (!boundaryMatch) { res.writeHead(400); res.end("No boundary"); return; }
-
-    const boundary = boundaryMatch[1];
-    const parts = body.toString("binary").split(`--${boundary}`);
-    let videoData: Buffer | null = null;
-    let fps = "10";
-    let width = "480";
-    let fileExt = ".mp4";
-
-    for (const part of parts) {
-      if (part.includes('name="video"')) {
-        const headerEnd = part.indexOf("\r\n\r\n");
-        if (headerEnd < 0) continue;
-        const header = part.slice(0, headerEnd);
-        const filenameMatch = header.match(/filename="([^"]+)"/);
-        if (filenameMatch) fileExt = extname(filenameMatch[1]) || ".mp4";
-        const binaryData = part.slice(headerEnd + 4);
-        const trimmed = binaryData.endsWith("\r\n") ? binaryData.slice(0, -2) : binaryData;
-        videoData = Buffer.from(trimmed, "binary");
-      } else if (part.includes('name="fps"')) {
-        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
-        if (val) fps = val;
-      } else if (part.includes('name="width"')) {
-        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
-        if (val) width = val;
-      }
-    }
-
-    if (!videoData) { res.writeHead(400); res.end("No video file"); return; }
+    const fps = parsed.fields.fps ?? "20";
+    const width = parsed.fields.width ?? "480";
 
     const tmpDir = join(tmpdir(), "gifhero-bench-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
-    const inputPath = join(tmpDir, `input${fileExt}`);
+    const inputPath = join(tmpDir, `input${parsed.fileExt}`);
     const framesDir = join(tmpDir, "frames");
     const outputPath = join(tmpDir, "output.gif");
     mkdirSync(framesDir, { recursive: true });
 
-    writeFileSync(inputPath, videoData);
+    writeFileSync(inputPath, parsed.videoData);
 
     try {
       const t0 = Date.now();
+      const frameCount = extractFrames(inputPath, framesDir, fps, width);
 
-      // Extract frames with ffmpeg
-      execSync(
-        `ffmpeg -y -i "${inputPath}" -t 20 -vf "fps=${fps},scale='min(${width},iw)':'min(${width},ih)':force_original_aspect_ratio=decrease" "${framesDir}/%04d.png"`,
-        { stdio: "ignore", timeout: 60000 },
-      );
-
-      // Encode with gifski
+      // gifski at default settings (q100) with target width downscaling
       execSync(
         `gifski --fps ${fps} --width ${width} -o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" },
@@ -107,7 +115,7 @@ const server = createServer(async (req, res) => {
 
       const gif = readFileSync(outputPath);
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`[gifski] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${fps}fps, ${width}px)`);
+      console.log(`[gifski CLI] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${frameCount} frames, ${fps}fps, ${width}px, default q)`);
 
       res.writeHead(200, {
         "Content-Type": "image/gif",
@@ -116,7 +124,7 @@ const server = createServer(async (req, res) => {
       });
       res.end(gif);
     } catch (err) {
-      console.error("[gifski] Error:", (err as Error).message);
+      console.error("[gifski CLI] Error:", (err as Error).message);
       res.writeHead(500);
       res.end((err as Error).message);
     } finally {
@@ -129,73 +137,37 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/api/gifhero") {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
-    const body = Buffer.concat(chunks);
+    const parsed = parseMultipart(Buffer.concat(chunks), req.headers["content-type"] ?? "");
+    if (!parsed?.videoData) { res.writeHead(400); res.end("No video file"); return; }
 
-    const contentType = req.headers["content-type"] ?? "";
-    const boundaryMatch = contentType.match(/boundary=(.+)/);
-    if (!boundaryMatch) { res.writeHead(400); res.end("No boundary"); return; }
-
-    const boundary = boundaryMatch[1];
-    const parts = body.toString("binary").split(`--${boundary}`);
-    let videoData: Buffer | null = null;
-    let fps = "20";
-    let width = "480";
-    let preset = "balanced";
-    let fileExt = ".mp4";
-
-    for (const part of parts) {
-      if (part.includes('name="video"')) {
-        const headerEnd = part.indexOf("\r\n\r\n");
-        if (headerEnd < 0) continue;
-        const header = part.slice(0, headerEnd);
-        const filenameMatch = header.match(/filename="([^"]+)"/);
-        if (filenameMatch) fileExt = extname(filenameMatch[1]) || ".mp4";
-        const binaryData = part.slice(headerEnd + 4);
-        const trimmed = binaryData.endsWith("\r\n") ? binaryData.slice(0, -2) : binaryData;
-        videoData = Buffer.from(trimmed, "binary");
-      } else if (part.includes('name="fps"')) {
-        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
-        if (val) fps = val;
-      } else if (part.includes('name="width"')) {
-        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
-        if (val) width = val;
-      } else if (part.includes('name="preset"')) {
-        const val = part.split("\r\n\r\n")[1]?.trim().replace(/\r\n$/, "");
-        if (val) preset = val;
-      }
-    }
-
-    if (!videoData) { res.writeHead(400); res.end("No video file"); return; }
+    const fps = parsed.fields.fps ?? "20";
+    const width = parsed.fields.width ?? "480";
+    const preset = parsed.fields.preset ?? "balanced";
 
     const tmpDir = join(tmpdir(), "gifhero-cli-bench-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
-    const inputPath = join(tmpDir, `input${fileExt}`);
+    const inputPath = join(tmpDir, `input${parsed.fileExt}`);
+    const framesDir = join(tmpDir, "frames");
     const outputPath = join(tmpDir, "output.gif");
+    mkdirSync(framesDir, { recursive: true });
 
-    writeFileSync(inputPath, videoData);
+    writeFileSync(inputPath, parsed.videoData);
 
     const gifheroBin = join(import.meta.dirname, "../../packages/gifhero-core/target/release/gifhero");
 
     try {
       const t0 = Date.now();
+      const frameCount = extractFrames(inputPath, framesDir, fps, width);
 
-      // Probe video dimensions to compute target width (longest dimension = width param)
-      const probeOut = execSync(
-        `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "${inputPath}"`,
-        { timeout: 10000 },
-      ).toString().trim();
-      const [srcW, srcH] = probeOut.split("x").map(Number);
-      const longestSrc = Math.max(srcW, srcH);
-      const targetW = Math.round(srcW * Math.min(1, parseInt(width) / longestSrc));
-
+      // gifhero CLI at default settings with the same extracted frames
       execSync(
-        `"${gifheroBin}" "${inputPath}" -w ${targetW} --fps ${fps} --max-duration 20 --preset ${preset} -o "${outputPath}" -q`,
-        { stdio: "ignore", timeout: 120000 },
+        `"${gifheroBin}" "${framesDir}"/*.png -w ${width} --preset ${preset} -o "${outputPath}" -q`,
+        { stdio: "ignore", timeout: 120000, shell: "/bin/bash" },
       );
 
       const gif = readFileSync(outputPath);
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`[gifhero-cli] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${fps}fps, ${width}px, ${preset})`);
+      console.log(`[gifhero CLI] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${frameCount} frames, ${fps}fps, ${width}px, ${preset})`);
 
       res.writeHead(200, {
         "Content-Type": "image/gif",
@@ -204,7 +176,7 @@ const server = createServer(async (req, res) => {
       });
       res.end(gif);
     } catch (err) {
-      console.error("[gifhero-cli] Error:", (err as Error).message);
+      console.error("[gifhero CLI] Error:", (err as Error).message);
       res.writeHead(500);
       res.end((err as Error).message);
     } finally {
@@ -213,7 +185,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // ── /api/bench-results endpoint (list latest benchmark JSON) ──
+  // ── /api/bench-results endpoint ──
   if (req.method === "GET" && req.url === "/api/bench-results") {
     const resultsDir = join(ROOT, "test/bench/results");
     try {
@@ -247,7 +219,6 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`gifhero test server + gifski API on http://localhost:${PORT}/`);
+  console.log(`gifhero test server on http://localhost:${PORT}/`);
   console.log(`Open http://localhost:${PORT}/test/browser/ to test`);
-  console.log(`gifski benchmark available at POST /api/gifski`);
 });
