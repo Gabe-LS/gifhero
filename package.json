@@ -1,7 +1,7 @@
 {
   "name": "gifhero",
-  "version": "0.0.1",
-  "description": "The highest-quality GIF encoder for the browser. Temporal dithering, cross-frame palettes, lossy LZW, and more.",
+  "version": "1.0.0",
+  "description": "High-compression GIF encoder. Smaller files than gifski with better visual quality. Browser SDK + Node.js, zero dependencies, WASM-powered.",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -18,8 +18,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -39,19 +43,20 @@
     "gif",
     "encoder",
     "animation",
-    "dithering",
     "quantization",
-    "temporal-dithering",
-    "floyd-steinberg",
-    "neuquant",
-    "lzw",
-    "browser",
+    "imagequant",
     "wasm",
-    "chrome-extension"
+    "browser",
+    "chrome-extension",
+    "dithering",
+    "floyd-steinberg",
+    "lzw",
+    "video-to-gif"
   ],
-  "author": "",
+  "author": "Gabe-LS",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^26.1.0",
     "canvas": "^3.1.0",
     "gifski-wasm": "^2.2.0",
     "tsup": "^8.4.0",
@@ -60,8 +65,22 @@
     "vitest": "^3.1.0"
   },
   "dependencies": {
-    "@squoosh-kit/imagequant": "^0.2.4",
-    "imagequant": "^0.1.2",
     "mediabunny": "^1.49.0"
-  }
+  },
+  "peerDependencies": {
+    "imagequant": "^0.1.2"
+  },
+  "peerDependenciesMeta": {
+    "imagequant": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gabe-LS/gifhero.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Gabe-LS/gifhero/issues"
+  },
+  "homepage": "https://github.com/Gabe-LS/gifhero"
 }

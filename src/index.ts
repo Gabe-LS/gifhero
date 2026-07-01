@@ -1439,7 +1439,7 @@ export async function encodeParallel(
         worker.postMessage({
           type: "downsample", id: idx,
           frameBuffer: buf, srcW: width, srcH: height, dstW, dstH,
-        }, [buf]);
+        }, [buf as ArrayBuffer]);
       }
       for (const w of workers) dispatch(w);
     });
