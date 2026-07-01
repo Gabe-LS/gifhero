@@ -105,17 +105,38 @@ interface EncodeResult { timing?: Record<string, number> }
 type EncoderFn = (framesDir: string, outputPath: string, targetWidth?: number) => EncodeResult | Promise<EncodeResult> | void | Promise<void>;
 
 const ALL_ENCODERS: Record<string, { available: () => boolean; encode: EncoderFn }> = {
-  "gifhero": {
+  "gifhero-wasm": {
     available: () => true,
     encode: async (framesDir, outputPath, targetWidth) => {
       const { width, height, frames } = loadPngFrames(framesDir);
       const tw = targetWidth && targetWidth < width ? targetWidth : undefined;
       const timing: Record<string, number> = {};
       writeFileSync(outputPath, await encode({
-        width, height, frames, preset: "balanced", lossyLzw: 0, timing,
+        width, height, frames, preset: "balanced", timing,
         ...(tw ? { targetWidth: tw } : {}),
       }));
       return { timing };
+    },
+  },
+  "gifhero": {
+    available: () => {
+      const bin = join(__dirname, "../../packages/gifhero-core/target/release/gifhero");
+      try { return statSync(bin).isFile(); } catch { return false; }
+    },
+    encode: async (framesDir, outputPath, targetWidth) => {
+      const bin = join(__dirname, "../../packages/gifhero-core/target/release/gifhero");
+      const tmpVideo = outputPath + ".tmp.mkv";
+      // Convert PNGs to lossless video so the CLI can process them
+      await execAsync(
+        `ffmpeg -y -framerate 20 -i "${framesDir}/%04d.png" -c:v ffv1 "${tmpVideo}"`,
+        { timeout: 60000 },
+      );
+      const wFlag = targetWidth ? `-w ${targetWidth} ` : "";
+      await execAsync(
+        `"${bin}" "${tmpVideo}" ${wFlag}--fps 20 --preset balanced -o "${outputPath}" -q`,
+        { timeout: 120000 },
+      );
+      try { rmSync(tmpVideo); } catch {}
     },
   },
   "gifski": {

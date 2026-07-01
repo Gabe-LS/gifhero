@@ -15,53 +15,75 @@
   <rect x="0.5" y="0.5" width="699" height="309" rx="12" fill="none" stroke="#e5e7eb"/>
 
   <!-- Title -->
-  <text x="350" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#111827">In-browser encoding: gifhero vs gifski-wasm</text>
-  <text x="350" y="46" text-anchor="middle" font-size="10" fill="#525252">480p · 25 fixtures · same WASM runtime · same input frames</text>
+  <text x="350" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#111827">In-browser GIF encoding: gifhero vs gifski-wasm</text>
+  <text x="350" y="46" text-anchor="middle" font-size="10" fill="#525252">25 fixtures x 4 resolutions · same WASM runtime · same input frames</text>
 
   <!-- Divider -->
   <line x1="350" y1="56" x2="350" y2="240" stroke="#e5e7eb" stroke-width="1"/>
 
   <!--
-    LEFT:  File size. gifhero=100%, gifski-wasm=127% (21% larger). Max bar at 127%.
-           Scale: 200/127 = 1.575px per %
-    RIGHT: VMAF. gifhero=96.4, gifski-wasm=96.0 (avg across 25 fixtures).
-           Range 93-100. Scale: 200/(100-93) = 28.6px per point.
+    LEFT:  File size by resolution (% of gifhero-wasm).
+           gifski-wasm is 121-130% of gifhero. Max bar at 130%.
+           Bars start x=115, max width=191px. Scale: 191/130 = 1.47px per %.
+           Labels end at x=108. Leftmost label "gifski-wasm" ~72px, starts ~x=36.
+           Separator line x1=40 aligns with leftmost label.
+
+    RIGHT: VMAF average by resolution.
+           Range ~95-98. Scale chosen so magick bar+label reaches x=660.
+           Labels end at x=423. Bars start x=430.
+           gifhero ~96.7 avg, gifski-wasm ~96.0 avg.
+           Base=93, range 7pts. Max bar (gifhero 97.2) = 191px → scale=191/4.2=45.5px/pt
+           Rightmost: gifhero 97.2 → (97.2-93)*45.5 = 191px, text at 430+191+6=627. Within 660.
   -->
 
   <!-- ==================== LEFT: FILE SIZE ==================== -->
   <text x="190" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">FILE SIZE (% of gifhero)</text>
 
-  <text x="108" y="110" text-anchor="end" font-size="12" font-weight="600" fill="#111827">gifhero</text>
-  <rect x="115" y="97" width="158" height="20" rx="3" fill="url(#g1)"/>
-  <text x="279" y="112" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
+  <text x="108" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
+  <rect x="115" y="89" width="147" height="18" rx="3" fill="url(#g1)"/>
+  <text x="268" y="102" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
 
-  <text x="108" y="150" text-anchor="end" font-size="12" fill="#4b5563">gifski-wasm</text>
-  <rect x="115" y="137" width="200" height="20" rx="3" fill="url(#g2)"/>
-  <text x="321" y="152" font-size="10" fill="#525252">127%</text>
+  <text x="108" y="130" text-anchor="end" font-size="11" fill="#4b5563">gifski-wasm</text>
+  <rect x="115" y="117" width="178" height="18" rx="3" fill="url(#g2)"/>
+  <text x="299" y="130" font-size="10" fill="#525252">121%</text>
 
-  <text x="115" y="185" font-size="10" fill="#5b21b6" font-weight="600">25/25 fixtures smaller</text>
-  <text x="115" y="200" font-size="10" fill="#525252">avg 21% smaller</text>
+  <text x="108" y="158" text-anchor="end" font-size="11" fill="#4b5563">gifski CLI</text>
+  <rect x="115" y="145" width="162" height="18" rx="3" fill="url(#g2)"/>
+  <text x="283" y="158" font-size="10" fill="#525252">110%</text>
 
-  <text x="115" y="228" font-size="9" fill="#525252">&#x25C4; smaller is better</text>
+  <text x="108" y="186" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg</text>
+  <rect x="115" y="173" width="191" height="18" rx="3" fill="url(#g2)"/>
+  <text x="312" y="186" font-size="10" fill="#525252">130%</text>
+
+  <text x="115" y="215" font-size="10" fill="#5b21b6" font-weight="600">25/25 fixtures smaller at every resolution</text>
+
+  <text x="115" y="236" font-size="9" fill="#525252">&#x25C4; smaller is better</text>
 
   <!-- ==================== RIGHT: QUALITY ==================== -->
-  <text x="525" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">QUALITY (VMAF 0–100)</text>
+  <text x="540" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">QUALITY (VMAF 0-100)</text>
 
-  <text x="423" y="110" text-anchor="end" font-size="12" font-weight="600" fill="#111827">gifhero</text>
-  <rect x="430" y="97" width="137" height="20" rx="3" fill="url(#g1)"/>
-  <text x="573" y="112" font-size="10" fill="#6d28d9" font-weight="600">96.8</text>
+  <text x="423" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
+  <rect x="430" y="89" width="191" height="18" rx="3" fill="url(#g1)"/>
+  <text x="627" y="102" font-size="10" fill="#6d28d9" font-weight="600">97.2</text>
 
-  <text x="423" y="150" text-anchor="end" font-size="12" fill="#4b5563">gifski-wasm</text>
-  <rect x="430" y="137" width="131" height="20" rx="3" fill="url(#g2)"/>
-  <text x="567" y="152" font-size="10" fill="#525252">96.6</text>
+  <text x="423" y="130" text-anchor="end" font-size="11" fill="#4b5563">gifski-wasm</text>
+  <rect x="430" y="117" width="145" height="18" rx="3" fill="url(#g2)"/>
+  <text x="581" y="130" font-size="10" fill="#525252">96.2</text>
 
-  <text x="430" y="185" font-size="10" fill="#525252">13/25 fixtures higher VMAF</text>
-  <text x="430" y="200" font-size="10" fill="#525252">comparable quality</text>
+  <text x="423" y="158" text-anchor="end" font-size="11" fill="#4b5563">gifski CLI</text>
+  <rect x="430" y="145" width="154" height="18" rx="3" fill="url(#g2)"/>
+  <text x="590" y="158" font-size="10" fill="#525252">96.4</text>
 
-  <text x="630" y="228" text-anchor="end" font-size="9" fill="#525252">higher is better &#x25BA;</text>
+  <text x="423" y="186" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg</text>
+  <rect x="430" y="173" width="172" height="18" rx="3" fill="url(#g2)"/>
+  <text x="608" y="186" font-size="10" fill="#525252">96.8</text>
+
+  <text x="430" y="215" font-size="10" fill="#525252">comparable or better quality</text>
+
+  <text x="660" y="236" text-anchor="end" font-size="9" fill="#525252">higher is better &#x25BA;</text>
 
   <!-- ==================== BOTTOM CALLOUT ==================== -->
   <line x1="40" y1="252" x2="660" y2="252" stroke="#e5e7eb" stroke-width="1"/>
-  <text x="350" y="274" text-anchor="middle" font-size="11" font-weight="600" fill="#5b21b6">21% smaller on every fixture, same quality</text>
-  <text x="350" y="290" text-anchor="middle" font-size="10" fill="#525252">Both run single-threaded WASM in the browser. Same input, same runtime.</text>
+  <text x="350" y="274" text-anchor="middle" font-size="11" font-weight="600" fill="#5b21b6">21-30% smaller on every fixture, at every resolution</text>
+  <text x="350" y="290" text-anchor="middle" font-size="10" fill="#525252">Both run single-threaded WASM. Same input, same runtime. 25 fixtures x 4 resolutions.</text>
 </svg>

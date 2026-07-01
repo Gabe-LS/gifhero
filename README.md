@@ -1,6 +1,6 @@
 # gifhero
 
-The best in-browser GIF encoder. **21% smaller files** than gifski-wasm on every fixture tested, at comparable quality and speed.
+The best in-browser GIF encoder. **21-30% smaller files** than gifski-wasm on every fixture at every resolution, with comparable or better quality.
 
 <p align="center">
   <img src="docs/benchmark-chart.png" alt="gifhero vs gifski-wasm: 21% smaller files on all 25 fixtures at comparable quality">
@@ -14,31 +14,31 @@ gifhero was built for this environment. It uses a sub-frame transparency pipelin
 
 Built with [Claude Code](https://claude.ai/code) over two weeks.
 
-## Browser benchmark
+## Benchmark results
 
-25 fixtures at 480p. Both encoders get the same frames, same resolution, same WASM runtime. Quality measured via VMAF.
+25 fixtures, 4 resolutions, 8 encoders. Same input frames, same quality measurement (VMAF). Full per-fixture results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-### gifhero vs gifski-wasm (in-browser)
+### gifhero vs gifski-wasm (in-browser, same WASM runtime)
 
-| | gifhero | gifski-wasm |
-|---|---|---|
-| **Size wins** | **25/25** | 0/25 |
-| **Avg file size** | **100%** | **127%** (+21% larger) |
-| **Avg VMAF** | 96.8 | 96.6 |
-
-gifhero produces smaller files on every single fixture. Quality is comparable (13/25 fixtures gifhero has higher VMAF, 12/25 gifski-wasm).
-
-### vs gifski CLI (native, multi-threaded)
-
-For reference, gifhero also beats the native gifski CLI on most content:
-
-| | Size wins | Avg size delta | VMAF wins |
+| Resolution | Size wins | Avg size delta | Avg VMAF (gifhero / gifski-wasm) |
 |---|---|---|---|
-| gifhero vs gifski CLI | **17/25** | **-9.4%** | **20/25** |
+| **480p** | **25/25** | **-21%** | 97.2 / 96.2 |
+| **360p** | **25/25** | **-28%** | 96.5 / 96.0 |
+| **240p** | **25/25** | **-28%** | 96.6 / 95.8 |
+| **160p** | **25/25** | **-30%** | 96.6 / 95.8 |
+
+Smaller files on every fixture at every resolution, with comparable or better quality.
+
+### gifhero vs gifski CLI (native, multi-threaded)
+
+| Resolution | Size wins | Avg size delta | VMAF wins |
+|---|---|---|---|
+| **480p** | **17/25** | **-10%** | **20/25** |
+| **360p** | **21/25** | **-16%** | 16/25 |
+| **240p** | **22/25** | **-19%** | 18/25 |
+| **160p** | **24/25** | **-23%** | 16/25 |
 
 gifski CLI is much faster (parallel quantization) but produces larger files on most content.
-
-Full per-fixture results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Install
 
