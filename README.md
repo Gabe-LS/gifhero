@@ -48,7 +48,7 @@ gifski CLI is much faster (parallel quantization) but produces larger files on m
 
 ### Browser SDK
 
-372 KB gzipped total (encoder + video worker, WASM embedded, no separate fetch needed). Works in browsers, workers, and Chrome extensions.
+Encoder: 122 KB gzipped (WASM embedded, no separate fetch). Video demuxer (for video file input): 248 KB gzipped. Total with video support: 372 KB. Works in browsers, workers, and Chrome extensions.
 
 ```bash
 npm install gifhero
