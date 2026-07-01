@@ -15,7 +15,7 @@ use gif::{GifFrame, write_gif, compute_min_code_size};
 use lzw::{lzw_encode, lzw_encode_lossy};
 use probe::probe_frames;
 use quantize::{quantize_simple, quantize_with_background, build_shared_palette, remap_with_palette};
-use subframe::{find_changed_bbox, crop_indexed, decode_frame_to_canvas, trim_palette, rgba_to_rgb_palette};
+use subframe::{find_changed_bbox, edge_sparse_suppress, crop_indexed, decode_frame_to_canvas, trim_palette, rgba_to_rgb_palette};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Preset {
@@ -136,13 +136,19 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
     let probe_result = probe_frames(&refs, width, height, 3);
 
     // Adaptive parameters
-    let preset_quality: u8 = if is_quality { 98 } else { 95 };
-    let speed: i32 = 1;
+    let preset_quality: u8 = if is_quality { 98 } else { 90 };
+    let speed: i32 = if is_quality { 1 } else { 4 };
 
     let mut adaptive_max_colors: u32 = opts.max_colors.unwrap_or(256) as u32;
-    if !is_quality && probe_result.color_complexity >= 20000 {
-        adaptive_max_colors = adaptive_max_colors.min(192);
-    } else if is_quality && probe_result.color_complexity >= 30000 {
+    if adaptive_max_colors >= 256 && !is_quality {
+        let gdxc = probe_result.gradient_density * probe_result.color_complexity as f64;
+        if probe_result.color_complexity >= 1000 {
+            if gdxc > 14000.0 { /* keep 256 */ }
+            else if gdxc > 9000.0 { adaptive_max_colors = adaptive_max_colors.min(192); }
+            else { adaptive_max_colors = adaptive_max_colors.min(160); }
+        }
+    }
+    if is_quality && probe_result.color_complexity >= 30000 {
         adaptive_max_colors = adaptive_max_colors.min(224);
     }
 
@@ -156,20 +162,17 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
     let auto_threshold = if is_quality {
         (4.0 + 6.0 * (complexity / 5000.0).min(1.0)).round() as i32 + motion_adjust
     } else {
-        (5.0 + 5.0 * (complexity / 5000.0).min(1.0)).round() as i32 + motion_adjust
+        (4.0 + 4.0 * (complexity / 8000.0).min(1.0)).round() as i32 + motion_adjust
     };
-    let auto_threshold = auto_threshold.clamp(2, 10) as u8;
+    let stale_cap = if is_quality { 10 } else { 8 };
+    let auto_threshold = auto_threshold.clamp(2, stale_cap) as u8;
 
     let stale_threshold = opts.stale_threshold.unwrap_or(auto_threshold);
 
-    let base_lzw: u8 = 4;
-    let adaptive_lzw = opts.lossy_lzw.unwrap_or_else(|| {
-        let v = (base_lzw as f64 + probe_result.color_complexity as f64 / 3000.0).round() as u8;
-        v.clamp(base_lzw, 5)
-    });
+    let adaptive_lzw = opts.lossy_lzw.unwrap_or(0);
 
     // Shared palette
-    let use_shared = opts.target_width.is_some() || probe_result.color_complexity >= 8000;
+    let use_shared = opts.target_width.is_some();
     let shared_palette: Option<Vec<u8>> = if use_shared {
         let step = (frame_count / 10).max(1);
         let mut sampled: Vec<&[u8]> = Vec::new();
@@ -197,14 +200,21 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
     let scene_changes: std::collections::HashSet<usize> =
         probe_result.keyframes.iter().copied().collect();
 
+    // Palette fitness model
+    const MAX_FRAMES_PER_PALETTE: usize = 10;
+    const PALETTE_FITNESS_THRESHOLD: f64 = 8.0;
+
     let mut gif_frames: Vec<GifFrame> = Vec::with_capacity(frame_count);
     let mut canvas = vec![0u8; num_pixels * 4];
     let mut prev_palette_rgb: Vec<u8> = Vec::new();
+    let mut active_palette_rgba: Option<Vec<u8>> = None;
+    let mut frames_since_palette: usize = 0;
 
     for i in 0..frame_count {
         let delay_ms = delays[i];
+        let is_keyframe = i == 0 || scene_changes.contains(&i);
 
-        if i == 0 || scene_changes.contains(&i) {
+        if is_keyframe {
             if i > 0 {
                 canvas.fill(0);
             }
@@ -220,6 +230,11 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
             decode_frame_to_canvas(&mut canvas, &trimmed.indexed, &trimmed.palette, width, height);
 
             prev_palette_rgb = trimmed.palette.clone();
+            active_palette_rgba = Some(build_shared_palette(
+                &[get_frame(i)], width, height,
+                0, preset_quality, speed, (adaptive_max_colors - 1).max(2),
+            ));
+            frames_since_palette = 0;
 
             gif_frames.push(GifFrame {
                 indexed: trimmed.indexed,
@@ -236,8 +251,18 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
             continue;
         }
 
+        // Palette fitness check: remap vs full quantize
+        let mut use_remap = false;
+        if let Some(ref ap) = active_palette_rgba {
+            if frames_since_palette < MAX_FRAMES_PER_PALETTE {
+                let p95 = palette_p95_distance(get_frame(i), ap, num_pixels);
+                if p95 <= PALETTE_FITNESS_THRESHOLD { use_remap = true; }
+            }
+        }
+
         // Frames 1+: background-aware
-        let mut input_rgba = get_frame(i).to_vec();
+        let curr = get_frame(i);
+        let mut input_rgba = curr.to_vec();
 
         for j in 0..num_pixels {
             if probe_result.static_mask[j] != 0 {
@@ -256,31 +281,100 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
             stale_threshold
         };
 
+        // Texture map: 3×3 neighborhood luminance range
+        let mut tex_map = vec![0u8; num_pixels];
+        for ty in 0..height {
+            for tx in 0..width {
+                let mut tmin: u16 = 765;
+                let mut tmax: u16 = 0;
+                let y_lo = if ty > 0 { ty - 1 } else { 0 };
+                let y_hi = if ty + 1 < height { ty + 1 } else { height - 1 };
+                let x_lo = if tx > 0 { tx - 1 } else { 0 };
+                let x_hi = if tx + 1 < width { tx + 1 } else { width - 1 };
+                for ny in y_lo..=y_hi {
+                    for nx in x_lo..=x_hi {
+                        let ti = (ny * width + nx) * 4;
+                        let lum = input_rgba[ti] as u16 + input_rgba[ti + 1] as u16 + input_rgba[ti + 2] as u16;
+                        if lum < tmin { tmin = lum; }
+                        if lum > tmax { tmax = lum; }
+                    }
+                }
+                tex_map[ty * width + tx] = ((tmax - tmin) as u32).min(255) as u8;
+            }
+        }
+
+        // Direction-aware forward-look
+        let next_src: Option<&[u8]> = if i + 1 < frame_count { Some(get_frame(i + 1)) } else { None };
+
         for j in 0..num_pixels {
             if input_rgba[j * 4 + 3] == 0 { continue; }
             let si = j * 4;
             let d = (input_rgba[si] as i16 - canvas[si] as i16).abs()
                 .max((input_rgba[si+1] as i16 - canvas[si+1] as i16).abs())
-                .max((input_rgba[si+2] as i16 - canvas[si+2] as i16).abs());
-            if d <= frame_threshold as i16 {
-                input_rgba[si + 3] = 0;
+                .max((input_rgba[si+2] as i16 - canvas[si+2] as i16).abs()) as u8;
+
+            let tex = tex_map[j] as f32;
+            let tex_factor = 0.6 + 0.4 * (tex / 40.0).min(1.0);
+            let effective_threshold = frame_threshold as f32 * tex_factor;
+
+            if (d as f32) <= effective_threshold {
+                let mut keep_forward = false;
+                if let Some(ns) = next_src {
+                    if tex_map[j] < 40 && d > 1 {
+                        let fwd_diff = (ns[si] as i16 - canvas[si] as i16).abs()
+                            .max((ns[si+1] as i16 - canvas[si+1] as i16).abs())
+                            .max((ns[si+2] as i16 - canvas[si+2] as i16).abs());
+                        if fwd_diff > 4 {
+                            let dr = (input_rgba[si] as i32 - canvas[si] as i32)
+                                * (ns[si] as i32 - canvas[si] as i32);
+                            let dg = (input_rgba[si+1] as i32 - canvas[si+1] as i32)
+                                * (ns[si+1] as i32 - canvas[si+1] as i32);
+                            let db = (input_rgba[si+2] as i32 - canvas[si+2] as i32)
+                                * (ns[si+2] as i32 - canvas[si+2] as i32);
+                            if dr + dg + db > 0 { keep_forward = true; }
+                        }
+                    }
+                }
+                if !keep_forward {
+                    input_rgba[si + 3] = 0;
+                }
             }
         }
 
+        // Quantize or remap
         let r = if let Some(ref sp) = shared_palette {
             remap_with_palette(&input_rgba, width, height, sp, &canvas, 1.0)
+        } else if use_remap {
+            let ap = active_palette_rgba.as_ref().unwrap();
+            remap_with_palette(&input_rgba, width, height, ap, &canvas, 1.0)
         } else {
-            quantize_with_background(
+            let qr = quantize_with_background(
                 &input_rgba, width, height,
                 &canvas, &importance_map,
                 0, preset_quality, speed, adaptive_max_colors,
-            )
+            );
+            active_palette_rgba = Some(build_shared_palette(
+                &[curr], width, height,
+                0, preset_quality, speed, (adaptive_max_colors - 1).max(2),
+            ));
+            frames_since_palette = 0;
+            qr
         };
+
+        if use_remap { frames_since_palette += 1; }
 
         let t_idx = r.transparent_index;
 
-        // Find bbox
-        let bbox = find_changed_bbox(&r.indexed, width, height, t_idx);
+        // Edge sparse suppression + bbox
+        let mut indexed_mut = r.indexed;
+        let bbox = if t_idx >= 0 {
+            edge_sparse_suppress(
+                &mut indexed_mut, curr, &canvas,
+                width, height, t_idx, stale_threshold,
+            )
+        } else {
+            find_changed_bbox(&indexed_mut, width, height, t_idx)
+        };
 
         if bbox.is_none() {
             gif_frames.push(GifFrame {
@@ -297,7 +391,7 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
             });
         } else {
             let bbox = bbox.unwrap();
-            let cropped = crop_indexed(&r.indexed, width, &bbox);
+            let cropped = crop_indexed(&indexed_mut, width, &bbox);
 
             let rgb_pal = rgba_to_rgb_palette(&r.palette, r.palette_count);
 
@@ -337,8 +431,8 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
 
         // Update canvas from FULL indexed (not cropped)
         for j in 0..num_pixels {
-            if r.indexed[j] as i32 != t_idx {
-                let pi = r.indexed[j] as usize * 4;
+            if indexed_mut[j] as i32 != t_idx {
+                let pi = indexed_mut[j] as usize * 4;
                 let ci = j * 4;
                 canvas[ci] = r.palette[pi];
                 canvas[ci + 1] = r.palette[pi + 1];
@@ -368,6 +462,33 @@ pub fn encode_slices(frame_slices: &[&[u8]], delays: &[u16], opts: &EncodeOption
 
 // ── Shared helpers for both sequential and parallel paths ────────
 
+fn palette_p95_distance(rgba: &[u8], palette_rgba: &[u8], num_pixels: usize) -> f64 {
+    let pal_count = palette_rgba.len() / 4;
+    if pal_count == 0 { return 255.0; }
+    let sample_step = 1.max(num_pixels / 2000);
+    let mut dists: Vec<u16> = Vec::with_capacity(2000);
+    let mut j = 0;
+    while j < num_pixels {
+        let si = j * 4;
+        let sr = rgba[si];
+        let sg = rgba[si + 1];
+        let sb = rgba[si + 2];
+        let mut best: u16 = 765;
+        for p in 0..pal_count {
+            let pi = p * 4;
+            let d = (sr as i16 - palette_rgba[pi] as i16).unsigned_abs()
+                + (sg as i16 - palette_rgba[pi + 1] as i16).unsigned_abs()
+                + (sb as i16 - palette_rgba[pi + 2] as i16).unsigned_abs();
+            if d < best { best = d; }
+        }
+        dists.push(best);
+        j += sample_step;
+    }
+    dists.sort_unstable();
+    let idx = (dists.len() as f64 * 0.95) as usize;
+    dists.get(idx).copied().unwrap_or(0) as f64
+}
+
 struct PipelineParams {
     #[allow(dead_code)]
     is_quality: bool,
@@ -383,13 +504,19 @@ fn compute_pipeline_params(
     opts: &EncodeOptions,
     is_quality: bool,
 ) -> PipelineParams {
-    let preset_quality: u8 = if is_quality { 98 } else { 95 };
-    let speed: i32 = 1;
+    let preset_quality: u8 = if is_quality { 98 } else { 90 };
+    let speed: i32 = if is_quality { 1 } else { 4 };
 
     let mut adaptive_max_colors: u32 = opts.max_colors.unwrap_or(256) as u32;
-    if !is_quality && probe.color_complexity >= 20000 {
-        adaptive_max_colors = adaptive_max_colors.min(192);
-    } else if is_quality && probe.color_complexity >= 30000 {
+    if adaptive_max_colors >= 256 && !is_quality {
+        let gdxc = probe.gradient_density * probe.color_complexity as f64;
+        if probe.color_complexity >= 1000 {
+            if gdxc > 14000.0 { /* keep 256 */ }
+            else if gdxc > 9000.0 { adaptive_max_colors = adaptive_max_colors.min(192); }
+            else { adaptive_max_colors = adaptive_max_colors.min(160); }
+        }
+    }
+    if is_quality && probe.color_complexity >= 30000 {
         adaptive_max_colors = adaptive_max_colors.min(224);
     }
 
@@ -403,16 +530,13 @@ fn compute_pipeline_params(
     let auto_threshold = if is_quality {
         (4.0 + 6.0 * (complexity / 5000.0).min(1.0)).round() as i32 + motion_adjust
     } else {
-        (5.0 + 5.0 * (complexity / 5000.0).min(1.0)).round() as i32 + motion_adjust
+        (4.0 + 4.0 * (complexity / 8000.0).min(1.0)).round() as i32 + motion_adjust
     };
-    let auto_threshold = auto_threshold.clamp(2, 10) as u8;
+    let stale_cap = if is_quality { 10 } else { 8 };
+    let auto_threshold = auto_threshold.clamp(2, stale_cap) as u8;
     let stale_threshold = opts.stale_threshold.unwrap_or(auto_threshold);
 
-    let base_lzw: u8 = 4;
-    let adaptive_lzw = opts.lossy_lzw.unwrap_or_else(|| {
-        let v = (base_lzw as f64 + probe.color_complexity as f64 / 3000.0).round() as u8;
-        v.clamp(base_lzw, 5)
-    });
+    let adaptive_lzw = opts.lossy_lzw.unwrap_or(0);
 
     PipelineParams {
         is_quality,
@@ -516,7 +640,7 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
     let params = compute_pipeline_params(&probe_result, opts, is_quality);
 
     // ── 5. Shared palette ──
-    let use_shared = opts.target_width.is_some() || probe_result.color_complexity >= 8000;
+    let use_shared = opts.target_width.is_some();
     let shared_palette: Option<Vec<u8>> = if use_shared {
         let step = (frame_data.len() / 10).max(1);
         let mut sampled: Vec<&[u8]> = Vec::new();
@@ -541,20 +665,21 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
     let scene_changes: std::collections::HashSet<usize> =
         probe_result.keyframes.iter().copied().collect();
 
+    const MAX_FRAMES_PER_PALETTE: usize = 10;
+    const PALETTE_FITNESS_THRESHOLD: f64 = 8.0;
+
     // ── 6. Sequential quantize + sub-frame (canvas dependency) ──
-    // Quantization must be sequential: each frame's transparency depends
-    // on the true decoded canvas from all previous frames. Parallel
-    // approaches (approximate canvas, static-mask-only) produce 17-63%
-    // larger files on static content. This is the cost of sub-frame
-    // optimization — and why we produce 14% smaller files than gifski.
     let mut gif_frames: Vec<GifFrame> = Vec::with_capacity(frame_data.len());
     let mut canvas = vec![0u8; num_pixels * 4];
     let mut prev_palette_rgb: Vec<u8> = Vec::new();
+    let mut active_palette_rgba: Option<Vec<u8>> = None;
+    let mut frames_since_palette: usize = 0;
 
     for i in 0..frame_data.len() {
         let delay_ms = delays[i];
+        let is_kf = i == 0 || scene_changes.contains(&i);
 
-        if i == 0 || scene_changes.contains(&i) {
+        if is_kf {
             if i > 0 { canvas.fill(0); }
 
             let r = quantize_simple(
@@ -567,6 +692,11 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
 
             decode_frame_to_canvas(&mut canvas, &trimmed.indexed, &trimmed.palette, width, height);
             prev_palette_rgb = trimmed.palette.clone();
+            active_palette_rgba = Some(build_shared_palette(
+                &[frame_data[i].as_slice()], width, height,
+                0, params.preset_quality, params.speed, (params.adaptive_max_colors - 1).max(2),
+            ));
+            frames_since_palette = 0;
 
             gif_frames.push(GifFrame {
                 indexed: trimmed.indexed,
@@ -581,7 +711,16 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
             continue;
         }
 
-        let mut input_rgba = frame_data[i].clone();
+        let mut use_remap = false;
+        if let Some(ref ap) = active_palette_rgba {
+            if frames_since_palette < MAX_FRAMES_PER_PALETTE {
+                let p95 = palette_p95_distance(&frame_data[i], ap, num_pixels);
+                if p95 <= PALETTE_FITNESS_THRESHOLD { use_remap = true; }
+            }
+        }
+
+        let curr = &frame_data[i];
+        let mut input_rgba = curr.clone();
 
         for j in 0..num_pixels {
             if probe_result.static_mask[j] != 0 {
@@ -600,29 +739,95 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
             params.stale_threshold
         };
 
+        let mut tex_map = vec![0u8; num_pixels];
+        for ty in 0..height {
+            for tx in 0..width {
+                let mut tmin: u16 = 765;
+                let mut tmax: u16 = 0;
+                let y_lo = if ty > 0 { ty - 1 } else { 0 };
+                let y_hi = if ty + 1 < height { ty + 1 } else { height - 1 };
+                let x_lo = if tx > 0 { tx - 1 } else { 0 };
+                let x_hi = if tx + 1 < width { tx + 1 } else { width - 1 };
+                for ny in y_lo..=y_hi {
+                    for nx in x_lo..=x_hi {
+                        let ti = (ny * width + nx) * 4;
+                        let lum = input_rgba[ti] as u16 + input_rgba[ti + 1] as u16 + input_rgba[ti + 2] as u16;
+                        if lum < tmin { tmin = lum; }
+                        if lum > tmax { tmax = lum; }
+                    }
+                }
+                tex_map[ty * width + tx] = ((tmax - tmin) as u32).min(255) as u8;
+            }
+        }
+
+        let next_src: Option<&[u8]> = if i + 1 < frame_data.len() { Some(&frame_data[i + 1]) } else { None };
+
         for j in 0..num_pixels {
             if input_rgba[j * 4 + 3] == 0 { continue; }
             let si = j * 4;
             let d = (input_rgba[si] as i16 - canvas[si] as i16).abs()
                 .max((input_rgba[si+1] as i16 - canvas[si+1] as i16).abs())
-                .max((input_rgba[si+2] as i16 - canvas[si+2] as i16).abs());
-            if d <= frame_threshold as i16 {
-                input_rgba[si + 3] = 0;
+                .max((input_rgba[si+2] as i16 - canvas[si+2] as i16).abs()) as u8;
+
+            let tex = tex_map[j] as f32;
+            let tex_factor = 0.6 + 0.4 * (tex / 40.0).min(1.0);
+            let effective_threshold = frame_threshold as f32 * tex_factor;
+
+            if (d as f32) <= effective_threshold {
+                let mut keep_forward = false;
+                if let Some(ns) = next_src {
+                    if tex_map[j] < 40 && d > 1 {
+                        let fwd_diff = (ns[si] as i16 - canvas[si] as i16).abs()
+                            .max((ns[si+1] as i16 - canvas[si+1] as i16).abs())
+                            .max((ns[si+2] as i16 - canvas[si+2] as i16).abs());
+                        if fwd_diff > 4 {
+                            let dr = (input_rgba[si] as i32 - canvas[si] as i32)
+                                * (ns[si] as i32 - canvas[si] as i32);
+                            let dg = (input_rgba[si+1] as i32 - canvas[si+1] as i32)
+                                * (ns[si+1] as i32 - canvas[si+1] as i32);
+                            let db = (input_rgba[si+2] as i32 - canvas[si+2] as i32)
+                                * (ns[si+2] as i32 - canvas[si+2] as i32);
+                            if dr + dg + db > 0 { keep_forward = true; }
+                        }
+                    }
+                }
+                if !keep_forward {
+                    input_rgba[si + 3] = 0;
+                }
             }
         }
 
         let r = if let Some(ref sp) = shared_palette {
             remap_with_palette(&input_rgba, width, height, sp, &canvas, 1.0)
+        } else if use_remap {
+            let ap = active_palette_rgba.as_ref().unwrap();
+            remap_with_palette(&input_rgba, width, height, ap, &canvas, 1.0)
         } else {
-            quantize_with_background(
+            let qr = quantize_with_background(
                 &input_rgba, width, height,
                 &canvas, &importance_map,
                 0, params.preset_quality, params.speed, params.adaptive_max_colors,
-            )
+            );
+            active_palette_rgba = Some(build_shared_palette(
+                &[curr.as_slice()], width, height,
+                0, params.preset_quality, params.speed, (params.adaptive_max_colors - 1).max(2),
+            ));
+            frames_since_palette = 0;
+            qr
         };
 
+        if use_remap { frames_since_palette += 1; }
+
         let t_idx = r.transparent_index;
-        let bbox = find_changed_bbox(&r.indexed, width, height, t_idx);
+        let mut indexed_mut = r.indexed;
+        let bbox = if t_idx >= 0 {
+            edge_sparse_suppress(
+                &mut indexed_mut, curr, &canvas,
+                width, height, t_idx, params.stale_threshold,
+            )
+        } else {
+            find_changed_bbox(&indexed_mut, width, height, t_idx)
+        };
 
         if bbox.is_none() {
             gif_frames.push(GifFrame {
@@ -637,7 +842,7 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
             });
         } else {
             let bbox = bbox.unwrap();
-            let cropped = crop_indexed(&r.indexed, width, &bbox);
+            let cropped = crop_indexed(&indexed_mut, width, &bbox);
             let rgb_pal = rgba_to_rgb_palette(&r.palette, r.palette_count);
 
             if t_idx >= 0 {
@@ -669,8 +874,8 @@ pub fn encode_parallel(frames: &[EncodeFrame], opts: &EncodeOptions) -> Vec<u8> 
         }
 
         for j in 0..num_pixels {
-            if r.indexed[j] as i32 != t_idx {
-                let pi = r.indexed[j] as usize * 4;
+            if indexed_mut[j] as i32 != t_idx {
+                let pi = indexed_mut[j] as usize * 4;
                 let ci = j * 4;
                 canvas[ci] = r.palette[pi];
                 canvas[ci + 1] = r.palette[pi + 1];

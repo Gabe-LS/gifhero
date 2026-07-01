@@ -2,7 +2,7 @@
 
 The highest-compression GIF encoder. Browser SDK + native CLI.
 
-gifhero produces **smaller files than gifski** on 68% of fixtures with **better VMAF on 84%** — validated across 25 diverse video fixtures at 4 resolutions, without lossy LZW compression.
+gifhero produces **smaller files than gifski** on 68% of fixtures with **better VMAF on 84%** — validated across 25 diverse video fixtures at 4 resolutions.
 
 ## Why gifhero
 
@@ -19,13 +19,13 @@ Size (KB)                     Quality (VMAF)
     magick       █████████████    magick       ██████████░░  98.0
 ```
 
-gifhero is smaller than gifski on most content AND higher quality — without any lossy LZW tricks.
+gifhero is smaller than gifski on most content AND higher quality.
 
 ## Benchmark results
 
 25 fixtures × 4 resolutions. Full results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-### gifhero vs gifski (25 fixtures)
+### gifhero vs gifski (25 fixtures, default settings)
 
 | Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
 |-----------|-----------|-----------|------------|------------|
@@ -34,7 +34,7 @@ gifhero is smaller than gifski on most content AND higher quality — without an
 | **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
 | **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
 
-Smaller files AND better VMAF at every resolution. No lossy LZW.
+Smaller files AND better VMAF at every resolution.
 
 ## Install
 
@@ -73,25 +73,26 @@ Requires ffmpeg on PATH for video decoding.
 
 ## Encode speed
 
-| | Per file (480p, 100 frames) | Notes |
+| | Per file (100 frames, 720p → 480p) | Notes |
 |---|---|---|
-| gifhero SDK (Node.js) | ~4s | TS + WASM pipeline |
-| gifhero CLI (Rust) | ~0.9s | Parallel Lanczos3 + LZW |
+| gifhero CLI (Rust) | ~1.3s | Rayon parallel Lanczos3 + LZW, palette fitness remap |
+| gifhero SDK (Node.js) | ~14s | TS orchestrator + WASM FrameEncoder |
 | gifski CLI | ~0.3s | Parallel quantization |
 
-gifski is faster because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking (each frame's transparency depends on the previous decoded frame).
+gifski is faster because it parallelizes quantization across frames. gifhero can't — the sub-frame pipeline requires sequential canvas tracking (each frame's transparency depends on the previous decoded frame). gifhero compensates with palette fitness reuse (~90% of frames use fast remap instead of full quantization).
 
-### Per-stage timing (bbb-clip-01, 100 frames, 480p)
+Batch throughput (Rust CLI): **3.4 files/s** at 4 concurrent files on 16 cores.
+
+### Per-stage timing (SDK, bbb-clip-01, 100 frames, 480p)
 
 | Stage | Time | % |
 |-------|------|---|
-| quantize | 2.0s | 47% |
-| transparency | 0.6s | 14% |
-| write (LZW + GIF) | 0.3s | 7% |
-| denoise | 0.2s | 5% |
-| probe | 0.1s | 3% |
+| quantize (WASM) | ~12.6s | 92% |
+| write (LZW + GIF) | ~730ms | 5% |
+| denoise | ~200ms | 1.5% |
+| probe | ~165ms | 1.2% |
 
-Batch throughput (Rust CLI): **3.4 files/s** at 4 concurrent files on 16 cores.
+Per-frame transparency, bbox, crop, and canvas update run inside a unified WASM `FrameEncoder` call (included in quantize timing).
 
 ## Browser sources
 
@@ -132,24 +133,23 @@ Two-pass pipeline: **probe** then **encode**.
 
 **Pass 1 — Probe** scans all frames in < 100ms:
 - Per-pixel min/max tracking → static mask (pixels that never change)
-- Motion level (avg fraction of pixels changing per frame)
-- Color complexity (distinct 6-bit quantized colors)
+- Motion level, color complexity, gradient density
 - Scene change detection and motion-to-static transitions
 
 **Pass 2 — Encode** uses probe results to drive every decision:
 1. Temporal denoise: 3-frame median filter, triggered only when sub-perceptual noise is detected
 2. WASM Lanczos3 downscale (12× faster than pure JS, bit-identical output)
-3. Palette fitness model: build shared palette at keyframes, fast remap on subsequent frames, rebuild when palette fitness degrades
-4. Per-frame: alpha-zero static + stale pixels → imagequant with `set_background` → edge sparse suppression → bbox crop → palette trim (power-of-2) → LZW with deferred clear
+3. Palette fitness model: build shared palette at keyframes, fast remap on subsequent frames, rebuild when palette fitness degrades (p95 nearest-color distance > 8)
+4. Per-frame: texture-aware threshold + direction-aware forward-look → alpha-zero static + stale pixels → imagequant with `set_background` → edge sparse suppression → bbox crop → palette trim (power-of-2) → LZW with deferred clear
 5. GIF89a assembly with local color tables
 
 ## Architecture
 
 ```
-Browser:
+Browser SDK:
   VideoDecoder → Mediabunny demux → frame extraction
-  → JS orchestrator → WASM quantize (per frame) → WASM Lanczos3
-  → JS sub-frame → JS LZW → GIF
+  → JS orchestrator → WASM FrameEncoder (transparency + quantize + subframe per frame)
+  → WASM Lanczos3 → JS LZW → GIF
 
 CLI (Rust):
   ffmpeg → raw RGBA frames
@@ -175,7 +175,7 @@ npx tsx test/bench/run.ts --encoders gifhero,gifski --metrics vmaf  # Specific c
 npx tsx test/bench/run.ts --parallel --resolutions 480              # Fast parallel, one resolution
 
 # Visual comparison
-open test/bench/viewer.html    # A/B viewer (loads results/latest/)
+open docs/viewer/index.html    # A/B comparison viewer
 
 # Rust CLI
 cd packages/gifhero-core
@@ -185,7 +185,7 @@ cargo test
 
 ## Benchmark methodology
 
-25 fixtures (animation, screencasts, webcam, sports, gradients, pixel art) × 4 resolutions. gifhero vs gifski at default settings, no lossy LZW. Quality measured via VMAF. Each run produces a timestamped directory with GIFs and JSON results. Full methodology and per-fixture tables in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+25 fixtures (animation, screencasts, webcam, sports, gradients, pixel art) × 4 resolutions. gifhero (balanced preset) vs gifski (default settings). Quality measured via VMAF. Each run produces a timestamped directory with GIFs and JSON results. Full methodology and per-fixture tables in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## License
 

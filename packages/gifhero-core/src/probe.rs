@@ -4,6 +4,8 @@ pub struct ProbeResult {
     pub color_complexity: usize,
     pub keyframes: Vec<usize>,
     pub per_frame_motion: Vec<f64>,
+    pub gradient_density: f64,
+    pub static_fraction: f64,
 }
 
 pub fn probe_frames(
@@ -100,11 +102,53 @@ pub fn probe_frames(
         }
     }
 
+    // Gradient density: fraction of pixels in smooth gradient regions
+    // Matches TS: sample every 5th frame, check 4 neighbors, divide by sample count
+    let mut gradient_pixels = 0usize;
+    let mut gradient_samples = 0usize;
+    let mut gf = 0;
+    while gf < frames.len() {
+        let frame = frames[gf];
+        for y in 1..(height.saturating_sub(1)) {
+            for x in 1..(width.saturating_sub(1)) {
+                let ci = (y * width + x) * 4;
+                let cr = frame[ci];
+                let cg = frame[ci + 1];
+                let cb = frame[ci + 2];
+                let mut smooth = true;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let ni = ((y as i32 + dy) as usize * width + (x as i32 + dx) as usize) * 4;
+                    if (cr as i16 - frame[ni] as i16).unsigned_abs() > 3
+                        || (cg as i16 - frame[ni + 1] as i16).unsigned_abs() > 3
+                        || (cb as i16 - frame[ni + 2] as i16).unsigned_abs() > 3
+                    {
+                        smooth = false;
+                        break;
+                    }
+                }
+                if smooth { gradient_pixels += 1; }
+                gradient_samples += 1;
+            }
+        }
+        gf += 5;
+    }
+    let gradient_density = if gradient_samples > 0 {
+        gradient_pixels as f64 / gradient_samples as f64
+    } else {
+        0.0
+    };
+
+    // Static fraction: fraction of pixels that are static
+    let static_count = static_mask.iter().filter(|&&v| v != 0).count();
+    let static_fraction = static_count as f64 / num_pixels as f64;
+
     ProbeResult {
         static_mask,
         motion_level,
         color_complexity: color_set.len(),
         keyframes,
         per_frame_motion,
+        gradient_density,
+        static_fraction,
     }
 }

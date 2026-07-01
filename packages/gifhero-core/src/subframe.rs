@@ -38,6 +38,107 @@ pub fn find_changed_bbox(
     }
 }
 
+/// Edge sparse suppression: suppress isolated near-stale opaque pixels
+/// in the outermost 40% of the bbox to shrink the crop rectangle.
+/// Returns the new bbox after suppression, or None if all pixels were suppressed.
+pub fn edge_sparse_suppress(
+    indexed: &mut [u8],
+    source_rgba: &[u8],
+    canvas_rgba: &[u8],
+    width: usize,
+    height: usize,
+    transparent_index: i32,
+    stale_threshold: u8,
+) -> Option<BBox> {
+    // Step 1: compute initial bbox from indexed (non-transparent pixels)
+    let mut min_x = width;
+    let mut max_x: isize = -1;
+    let mut min_y = height;
+    let mut max_y: isize = -1;
+
+    for y in 0..height {
+        for x in 0..width {
+            if indexed[y * width + x] as i32 != transparent_index {
+                if x < min_x { min_x = x; }
+                if x as isize > max_x { max_x = x as isize; }
+                if y < min_y { min_y = y; }
+                if y as isize > max_y { max_y = y as isize; }
+            }
+        }
+    }
+
+    // Step 2: if no opaque pixels, return None
+    if max_x < 0 {
+        return None;
+    }
+
+    let max_x = max_x as usize;
+    let max_y = max_y as usize;
+    let bw = max_x - min_x + 1;
+    let bh = max_y - min_y + 1;
+
+    // Step 3: compute margins
+    let margin_x = 4usize.max((bw as f64 * 0.4).round() as usize);
+    let margin_y = 4usize.max((bh as f64 * 0.4).round() as usize);
+
+    // Step 4: sparse parameters
+    let sparse_threshold = stale_threshold as i32 + 2;
+    let sparse_radius: usize = 6;
+
+    // Step 5: suppress isolated near-stale pixels in edge region
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let in_edge = (x - min_x < margin_x) || (max_x - x < margin_x)
+                || (y - min_y < margin_y) || (max_y - y < margin_y);
+            if !in_edge {
+                continue;
+            }
+            let idx = y * width + x;
+            if indexed[idx] as i32 == transparent_index {
+                continue;
+            }
+
+            // Diff using original source RGBA vs canvas RGBA
+            let si = idx * 4;
+            let d = (source_rgba[si] as i32 - canvas_rgba[si] as i32).abs()
+                .max((source_rgba[si + 1] as i32 - canvas_rgba[si + 1] as i32).abs())
+                .max((source_rgba[si + 2] as i32 - canvas_rgba[si + 2] as i32).abs());
+
+            if d > sparse_threshold {
+                continue;
+            }
+
+            // Check horizontal neighbors within sparse_radius
+            let x_lo = if x >= min_x + sparse_radius { x - sparse_radius } else { min_x };
+            let x_hi = if x + sparse_radius <= max_x { x + sparse_radius } else { max_x };
+            let row_start = y * width;
+            let mut has_neighbor = false;
+            for nx in x_lo..=x_hi {
+                if nx == x {
+                    continue;
+                }
+                if indexed[row_start + nx] as i32 != transparent_index {
+                    let nsi = (row_start + nx) * 4;
+                    let nd = (source_rgba[nsi] as i32 - canvas_rgba[nsi] as i32).abs()
+                        .max((source_rgba[nsi + 1] as i32 - canvas_rgba[nsi + 1] as i32).abs())
+                        .max((source_rgba[nsi + 2] as i32 - canvas_rgba[nsi + 2] as i32).abs());
+                    if nd > sparse_threshold {
+                        has_neighbor = true;
+                        break;
+                    }
+                }
+            }
+
+            if !has_neighbor {
+                indexed[idx] = transparent_index as u8;
+            }
+        }
+    }
+
+    // Step 6: recompute bbox after suppression
+    find_changed_bbox(indexed, width, height, transparent_index)
+}
+
 pub fn crop_indexed(
     indexed: &[u8], width: usize,
     bbox: &BBox,

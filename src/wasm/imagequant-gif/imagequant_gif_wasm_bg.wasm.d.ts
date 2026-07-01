@@ -1,9 +1,27 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_frameencoder_free: (a: number, b: number) => void;
+export const __wbg_frameresult_free: (a: number, b: number) => void;
 export const __wbg_quantresult_free: (a: number, b: number) => void;
 export const build_shared_palette: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
 export const downsample_lanczos3: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const frameencoder_encode_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => void;
+export const frameencoder_encode_keyframe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const frameencoder_new: (a: number, b: number) => number;
+export const frameencoder_palette_p95_distance: (a: number, b: number, c: number, d: number, e: number) => number;
+export const frameencoder_set_importance_map: (a: number, b: number, c: number) => void;
+export const frameencoder_set_static_mask: (a: number, b: number, c: number) => void;
+export const frameresult_crop_height: (a: number) => number;
+export const frameresult_crop_width: (a: number) => number;
+export const frameresult_indexed: (a: number, b: number) => void;
+export const frameresult_is_empty: (a: number) => number;
+export const frameresult_left: (a: number) => number;
+export const frameresult_palette_count: (a: number) => number;
+export const frameresult_palette_rgb: (a: number, b: number) => void;
+export const frameresult_palette_rgba: (a: number, b: number) => void;
+export const frameresult_top: (a: number) => number;
+export const frameresult_transparent_index: (a: number) => number;
 export const quantize_no_dither: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
 export const quantize_simple: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const quantize_with_background: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;

@@ -45,8 +45,9 @@ import {
   buildSharedPalette as gifBuildPalette,
   remapWithPalette as gifRemapPalette,
   downsampleWasm,
+  FrameEncoderWasm,
 } from "./quantizers/imagequant-gif.js";
-import type { GifQuantResult } from "./quantizers/imagequant-gif.js";
+import type { GifQuantResult, FrameEncodeResult } from "./quantizers/imagequant-gif.js";
 
 export const VERSION = "0.0.1";
 
@@ -207,7 +208,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
     ditherSerpentine: true,
     temporalDither: false,
     temporalWeight: 0,
-    lossyLzw: 4,
+    lossyLzw: 0,
     loop: 0,
     optimize: {
       subframe: true,
@@ -235,7 +236,7 @@ const PRESETS: Record<string, ResolvedOptions> = {
     ditherSerpentine: true,
     temporalDither: false,
     temporalWeight: 0,
-    lossyLzw: 4,
+    lossyLzw: 0,
     loop: 0,
     optimize: {
       subframe: true,
@@ -466,12 +467,18 @@ async function encodeSubframePipeline(
 
   // ── Try background-aware quantizer ──
   let useGifQuant = false;
+  let frameEncoder: FrameEncoderWasm | null = null;
   if (opts.quantizer === "imagequant") {
     try {
       gifQuantSimple(
         new Uint8ClampedArray(4), 1, 1, 80, 4, 4,
       );
       useGifQuant = true;
+      try {
+        frameEncoder = new FrameEncoderWasm(width, height);
+      } catch {
+        // Unified encoder not available, fall through to per-call path
+      }
     } catch {
       // WASM not available
     }
@@ -516,6 +523,11 @@ async function encodeSubframePipeline(
   const importanceMap = new Uint8Array(numPixels);
   for (let j = 0; j < numPixels; j++) {
     importanceMap[j] = probe.staticMask[j] ? 0 : 255;
+  }
+
+  if (frameEncoder) {
+    frameEncoder.setStaticMask(probe.staticMask);
+    frameEncoder.setImportanceMap(importanceMap);
   }
 
   // ── Fallback path setup ──
@@ -617,6 +629,69 @@ async function encodeSubframePipeline(
 
     const isKeyframe = i === 0 || sceneChangeSet.has(i);
 
+    // ── Unified WASM path: transparency + quantize + subframe in one call ──
+    if (frameEncoder) {
+      if (isKeyframe) {
+        const fr = frameEncoder.encodeKeyframe(
+          frames[i].data, opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors,
+        );
+        activePaletteRgba = gifBuildPalette(
+          [frames[i].data], width, height,
+          opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+        );
+        framesSincePalette = 0;
+        gifFrames[i] = {
+          indexedPixels: fr.indexed, palette: fr.paletteRgb,
+          width: fr.cropWidth, height: fr.cropHeight,
+          left: fr.left, top: fr.top,
+          transparentIndex: fr.transparentIndex >= 0 ? fr.transparentIndex : undefined,
+          delay, disposal: 0,
+        };
+      } else {
+        let useRemapU = false;
+        if (activePaletteRgba && framesSincePalette < MAX_FRAMES_PER_PALETTE) {
+          const p95 = frameEncoder.paletteP95Distance(frames[i].data, activePaletteRgba);
+          if (p95 <= PALETTE_FITNESS_THRESHOLD) useRemapU = true;
+        }
+        const fm = probe.perFrameMotion[i] ?? probe.motionLevel;
+        const nextSrc = i < frames.length - 1 ? frames[i + 1].data : null;
+        const remapPal = sharedPalette ?? (useRemapU && activePaletteRgba ? activePaletteRgba : null);
+
+        const fr = frameEncoder.encodeFrame(
+          frames[i].data, staleThreshold, fm, isQuality,
+          nextSrc, remapPal,
+          opts.quantizerQuality, opts.quantizerSpeed, adaptiveMaxColors, 6,
+        );
+
+        if (!sharedPalette && !useRemapU) {
+          activePaletteRgba = gifBuildPalette(
+            [frames[i].data], width, height,
+            opts.quantizerQuality, opts.quantizerSpeed, Math.max(2, adaptiveMaxColors - 1),
+          );
+          framesSincePalette = 0;
+        } else if (useRemapU) {
+          framesSincePalette++;
+        }
+
+        if (fr.isEmpty) {
+          gifFrames[i] = {
+            indexedPixels: new Uint8Array([0]), palette: gifFrames[i - 1].palette,
+            width: 1, height: 1, left: 0, top: 0,
+            delay, disposal: 0, transparentIndex: 0,
+          };
+        } else {
+          gifFrames[i] = {
+            indexedPixels: fr.indexed, palette: fr.paletteRgb,
+            width: fr.cropWidth, height: fr.cropHeight,
+            left: fr.left, top: fr.top,
+            transparentIndex: fr.transparentIndex >= 0 ? fr.transparentIndex : undefined,
+            delay, disposal: 0,
+          };
+        }
+      }
+      continue;
+    }
+
     // Decide: full quantize or remap with existing palette
     let useRemap = false;
     if (!isKeyframe && useGifQuant && activePaletteRgba && framesSincePalette < MAX_FRAMES_PER_PALETTE) {
@@ -676,17 +751,11 @@ async function encodeSubframePipeline(
         }
       }
 
-      // Zero alpha on pixels where source ≈ canvas within the
-      // adaptive threshold. The quantizer handles edge blending
-      // via set_background; this marks genuinely unchanged pixels.
       const fm = probe.perFrameMotion[i] ?? probe.motionLevel;
       const frameThreshold = (!isQuality && fm < 0.02)
         ? Math.min(10, staleThreshold + 1)
         : staleThreshold;
 
-      // Texture map: local variance in 3×3 neighborhood. Smooth areas
-      // get a lower effective threshold (protecting gradients from
-      // ghosting), detailed areas keep the full threshold.
       const texMap = new Uint8Array(numPixels);
       for (let ty = 0; ty < height; ty++) {
         for (let tx = 0; tx < width; tx++) {
@@ -707,7 +776,6 @@ async function encodeSubframePipeline(
         }
       }
 
-      // Next frame source for direction-aware forward-look
       const nextSrc = i < frames.length - 1 ? frames[i + 1].data : null;
 
       for (let j = 0; j < numPixels; j++) {
@@ -719,16 +787,11 @@ async function encodeSubframePipeline(
           Math.abs(inputRgba[si + 2] - canvasRgba[si + 2]),
         );
 
-        // Texture-scaled threshold: smooth areas (variance < 40) get
-        // 60–100% of the base threshold; detailed areas get full threshold
         const tex = texMap[j];
         const texFactor = 0.6 + 0.4 * Math.min(1, tex / 40);
         const effectiveThreshold = frameThreshold * texFactor;
 
         if (d <= effectiveThreshold) {
-          // Direction-aware forward-look: if this pixel is about to
-          // drift in the same direction next frame AND the area is
-          // smooth, keep it now to prevent ghost accumulation
           let keepForward = false;
           if (nextSrc && tex < 40 && d > 1) {
             const fwdDiff = Math.max(
@@ -775,7 +838,6 @@ async function encodeSubframePipeline(
       const tIdx = r.transparentIndex;
       const rgbPal = rgbaToRgbPalette(r.palette, r.paletteCount);
 
-      // Initial bounding box
       let minX = width, maxX = -1, minY = height, maxY = -1;
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -788,10 +850,6 @@ async function encodeSubframePipeline(
         }
       }
 
-      // Edge-only sparse suppression: suppress isolated near-stale opaque
-      // pixels in the outermost 20% of the bbox to shrink it. Interior
-      // pixels are never modified. Track suppressed positions to correct
-      // canvas drift afterward.
       const suppressed: number[] = [];
       if (maxX >= 0) {
         const bw = maxX - minX + 1, bh = maxY - minY + 1;
@@ -833,7 +891,6 @@ async function encodeSubframePipeline(
             if (!hasNeighbor) { r.indexed[idx] = tIdx; suppressed.push(idx); }
           }
         }
-        // Recompute bbox after suppression
         minX = width; maxX = -1; minY = height; maxY = -1;
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
@@ -883,7 +940,6 @@ async function encodeSubframePipeline(
         };
       }
 
-      // Update canvas
       for (let j = 0; j < numPixels; j++) {
         if (r.indexed[j] !== tIdx) {
           const pi = r.indexed[j] * 4;
@@ -989,7 +1045,10 @@ async function encodeSubframePipeline(
 
     compositeOntoCanvas(canvasRgba, sub, palette, width);
   }
-  if (t) {
+  if (frameEncoder) {
+    if (t) t.quantize = Math.round(performance.now() - t0);
+    frameEncoder.free();
+  } else if (t) {
     t.transparency = Math.round(tTransparency);
     t.quantize = Math.round(tQuantize);
     t.subframe = Math.round(tSubframe);

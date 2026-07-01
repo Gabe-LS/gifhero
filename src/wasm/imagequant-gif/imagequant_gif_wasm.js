@@ -1,5 +1,242 @@
 /* @ts-self-types="./imagequant_gif_wasm.d.ts" */
 
+class FrameEncoder {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        FrameEncoderFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_frameencoder_free(ptr, 0);
+    }
+    /**
+     * Encode non-keyframe: transparency prep + quantize/remap + bbox +
+     * edge sparse suppression + crop + trim palette + canvas update.
+     *
+     * If `remap_palette` is non-empty, uses fast remap path.
+     * Otherwise does full quantize with background.
+     * @param {Uint8Array} rgba
+     * @param {number} stale_threshold
+     * @param {number} frame_motion
+     * @param {boolean} is_quality
+     * @param {Uint8Array} next_frame
+     * @param {Uint8Array} remap_palette
+     * @param {number} quality
+     * @param {number} speed
+     * @param {number} max_colors
+     * @param {number} sparse_radius
+     * @returns {FrameResult}
+     */
+    encode_frame(rgba, stale_threshold, frame_motion, is_quality, next_frame, remap_palette, quality, speed, max_colors, sparse_radius) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_export);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(next_frame, wasm.__wbindgen_export);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passArray8ToWasm0(remap_palette, wasm.__wbindgen_export);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.frameencoder_encode_frame(retptr, this.__wbg_ptr, ptr0, len0, stale_threshold, frame_motion, is_quality, ptr1, len1, ptr2, len2, quality, speed, max_colors, sparse_radius);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return FrameResult.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Encode keyframe (frame 0 or scene change): full quantize, reset canvas.
+     * @param {Uint8Array} rgba
+     * @param {number} quality
+     * @param {number} speed
+     * @param {number} max_colors
+     * @returns {FrameResult}
+     */
+    encode_keyframe(rgba, quality, speed, max_colors) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_export);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.frameencoder_encode_keyframe(retptr, this.__wbg_ptr, ptr0, len0, quality, speed, max_colors);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return FrameResult.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @param {number} width
+     * @param {number} height
+     */
+    constructor(width, height) {
+        const ret = wasm.frameencoder_new(width, height);
+        this.__wbg_ptr = ret;
+        FrameEncoderFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Check palette fitness: p95 nearest-color distance.
+     * @param {Uint8Array} rgba
+     * @param {Uint8Array} palette_rgba
+     * @returns {number}
+     */
+    palette_p95_distance(rgba, palette_rgba) {
+        const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(palette_rgba, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.frameencoder_palette_p95_distance(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return ret;
+    }
+    /**
+     * @param {Uint8Array} map
+     */
+    set_importance_map(map) {
+        const ptr0 = passArray8ToWasm0(map, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.frameencoder_set_importance_map(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @param {Uint8Array} mask
+     */
+    set_static_mask(mask) {
+        const ptr0 = passArray8ToWasm0(mask, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.frameencoder_set_static_mask(this.__wbg_ptr, ptr0, len0);
+    }
+}
+if (Symbol.dispose) FrameEncoder.prototype[Symbol.dispose] = FrameEncoder.prototype.free;
+exports.FrameEncoder = FrameEncoder;
+
+class FrameResult {
+    static __wrap(ptr) {
+        const obj = Object.create(FrameResult.prototype);
+        obj.__wbg_ptr = ptr;
+        FrameResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        FrameResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_frameresult_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    get crop_height() {
+        const ret = wasm.frameresult_crop_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get crop_width() {
+        const ret = wasm.frameresult_crop_width(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get indexed() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.frameresult_indexed(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {boolean}
+     */
+    get is_empty() {
+        const ret = wasm.frameresult_is_empty(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get left() {
+        const ret = wasm.frameresult_left(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get palette_count() {
+        const ret = wasm.frameresult_palette_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get palette_rgb() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.frameresult_palette_rgb(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get palette_rgba() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.frameresult_palette_rgba(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get top() {
+        const ret = wasm.frameresult_top(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get transparent_index() {
+        const ret = wasm.frameresult_transparent_index(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) FrameResult.prototype[Symbol.dispose] = FrameResult.prototype.free;
+exports.FrameResult = FrameResult;
+
 class QuantResult {
     static __wrap(ptr) {
         const obj = Object.create(QuantResult.prototype);
@@ -282,6 +519,12 @@ function __wbg_get_imports() {
     };
 }
 
+const FrameEncoderFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_frameencoder_free(ptr, 1));
+const FrameResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_frameresult_free(ptr, 1));
 const QuantResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_quantresult_free(ptr, 1));

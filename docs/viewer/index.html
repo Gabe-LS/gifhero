@@ -160,7 +160,7 @@
 let BASE_URL = (() => {
   const p = new URLSearchParams(location.search);
   if (p.has('base')) return p.get('base').replace(/\/$/,'');
-  return 'results/latest/gifs';
+  return '../../test/bench/results/latest/gifs';
 })();
 
 class GifPlayer {
@@ -622,7 +622,7 @@ async function init() {
   const resultsParam = params.get('results');
   const jsonPaths = resultsParam
     ? resultsParam.split(',')
-    : ['results/latest/results.json'];
+    : ['../../test/bench/results/latest/results.json'];
 
   for (const path of jsonPaths) {
     try {

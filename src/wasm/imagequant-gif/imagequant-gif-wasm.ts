@@ -111,6 +111,137 @@ class QuantResultImpl {
   get transparent_index(): number { return wasm.quantresult_transparent_index(this.__wbg_ptr); }
 }
 
+// ── FrameResult class ─────────────────────────────────────────
+
+const FrameResultFin = (typeof FinalizationRegistry === "undefined")
+  ? { register: () => {}, unregister: () => {} }
+  : new FinalizationRegistry((ptr: number) => wasm.__wbg_frameresult_free(ptr, 1));
+
+class FrameResultImpl {
+  __wbg_ptr: number;
+  constructor(ptr: number) { this.__wbg_ptr = ptr; }
+  static __wrap(ptr: number) {
+    const obj = new FrameResultImpl(ptr);
+    FrameResultFin.register(obj, ptr, obj);
+    return obj;
+  }
+  free() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    FrameResultFin.unregister(this);
+    wasm.__wbg_frameresult_free(ptr, 0);
+  }
+  get indexed(): Uint8Array {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    try {
+      wasm.frameresult_indexed(retptr, this.__wbg_ptr);
+      return getArrayU8(
+        getDataView().getInt32(retptr, true),
+        getDataView().getInt32(retptr + 4, true),
+      ).slice();
+    } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+  }
+  get palette_rgb(): Uint8Array {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    try {
+      wasm.frameresult_palette_rgb(retptr, this.__wbg_ptr);
+      return getArrayU8(
+        getDataView().getInt32(retptr, true),
+        getDataView().getInt32(retptr + 4, true),
+      ).slice();
+    } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+  }
+  get palette_rgba(): Uint8Array {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    try {
+      wasm.frameresult_palette_rgba(retptr, this.__wbg_ptr);
+      return getArrayU8(
+        getDataView().getInt32(retptr, true),
+        getDataView().getInt32(retptr + 4, true),
+      ).slice();
+    } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+  }
+  get palette_count(): number { return wasm.frameresult_palette_count(this.__wbg_ptr) >>> 0; }
+  get transparent_index(): number { return wasm.frameresult_transparent_index(this.__wbg_ptr); }
+  get left(): number { return wasm.frameresult_left(this.__wbg_ptr) >>> 0; }
+  get top(): number { return wasm.frameresult_top(this.__wbg_ptr) >>> 0; }
+  get crop_width(): number { return wasm.frameresult_crop_width(this.__wbg_ptr) >>> 0; }
+  get crop_height(): number { return wasm.frameresult_crop_height(this.__wbg_ptr) >>> 0; }
+  get is_empty(): boolean { return wasm.frameresult_is_empty(this.__wbg_ptr) !== 0; }
+}
+
+// ── FrameEncoder class ────────────────────────────────────────
+
+const FrameEncoderFin = (typeof FinalizationRegistry === "undefined")
+  ? { register: () => {}, unregister: () => {} }
+  : new FinalizationRegistry((ptr: number) => wasm.__wbg_frameencoder_free(ptr, 1));
+
+export class FrameEncoder {
+  __wbg_ptr: number;
+  constructor(width: number, height: number) {
+    ensureWasm();
+    this.__wbg_ptr = wasm.frameencoder_new(width, height);
+    FrameEncoderFin.register(this, this.__wbg_ptr, this);
+  }
+  free() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    FrameEncoderFin.unregister(this);
+    wasm.__wbg_frameencoder_free(ptr, 0);
+  }
+  set_static_mask(mask: Uint8Array) {
+    const p0 = passArray8(mask), l0 = WASM_VECTOR_LEN;
+    wasm.frameencoder_set_static_mask(this.__wbg_ptr, p0, l0);
+  }
+  set_importance_map(map: Uint8Array) {
+    const p0 = passArray8(map), l0 = WASM_VECTOR_LEN;
+    wasm.frameencoder_set_importance_map(this.__wbg_ptr, p0, l0);
+  }
+  encode_keyframe(
+    rgba: Uint8Array, quality: number, speed: number, max_colors: number,
+  ) {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    try {
+      const p0 = passArray8(rgba), l0 = WASM_VECTOR_LEN;
+      wasm.frameencoder_encode_keyframe(retptr, this.__wbg_ptr, p0, l0, quality, speed, max_colors);
+      const r0 = getDataView().getInt32(retptr, true);
+      const r1 = getDataView().getInt32(retptr + 4, true);
+      const r2 = getDataView().getInt32(retptr + 8, true);
+      if (r2) throw takeObject(r1);
+      return FrameResultImpl.__wrap(r0);
+    } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+  }
+  encode_frame(
+    rgba: Uint8Array,
+    stale_threshold: number, frame_motion: number, is_quality: boolean,
+    next_frame: Uint8Array, remap_palette: Uint8Array,
+    quality: number, speed: number, max_colors: number, sparse_radius: number,
+  ) {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    try {
+      const p0 = passArray8(rgba), l0 = WASM_VECTOR_LEN;
+      const p1 = passArray8(next_frame), l1 = WASM_VECTOR_LEN;
+      const p2 = passArray8(remap_palette), l2 = WASM_VECTOR_LEN;
+      wasm.frameencoder_encode_frame(
+        retptr, this.__wbg_ptr,
+        p0, l0, stale_threshold, frame_motion, is_quality,
+        p1, l1, p2, l2,
+        quality, speed, max_colors, sparse_radius,
+      );
+      const r0 = getDataView().getInt32(retptr, true);
+      const r1 = getDataView().getInt32(retptr + 4, true);
+      const r2 = getDataView().getInt32(retptr + 8, true);
+      if (r2) throw takeObject(r1);
+      return FrameResultImpl.__wrap(r0);
+    } finally { wasm.__wbindgen_add_to_stack_pointer(16); }
+  }
+  palette_p95_distance(rgba: Uint8Array, palette_rgba: Uint8Array): number {
+    const p0 = passArray8(rgba), l0 = WASM_VECTOR_LEN;
+    const p1 = passArray8(palette_rgba), l1 = WASM_VECTOR_LEN;
+    return wasm.frameencoder_palette_p95_distance(this.__wbg_ptr, p0, l0, p1, l1);
+  }
+}
+
 // ── Exported functions ────────────────────────────────────────
 
 function ensureWasm(): void {

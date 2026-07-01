@@ -187,6 +187,8 @@ export class IncrementalProbe {
   private totalMotion = 0;
   private colorSet = new Set<number>();
   private frameCount = 0;
+  private gradientPixels = 0;
+  private gradientSamples = 0;
 
   constructor(
     private width: number,
@@ -243,6 +245,23 @@ export class IncrementalProbe {
           ((data[idx] >> 2) << 12) | ((data[idx + 1] >> 2) << 6) | (data[idx + 2] >> 2),
         );
       }
+      for (let y = 1; y < this.height - 1; y++) {
+        for (let x = 1; x < this.width - 1; x++) {
+          const ci = (y * this.width + x) * 4;
+          const cr = data[ci], cg = data[ci + 1], cb = data[ci + 2];
+          let smooth = true;
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+            const ni = ((y + dy) * this.width + (x + dx)) * 4;
+            if (Math.abs(cr - data[ni]) > 3 ||
+                Math.abs(cg - data[ni + 1]) > 3 ||
+                Math.abs(cb - data[ni + 2]) > 3) {
+              smooth = false; break;
+            }
+          }
+          if (smooth) this.gradientPixels++;
+          this.gradientSamples++;
+        }
+      }
     }
 
     this.prevFrame = data;
@@ -282,6 +301,8 @@ export class IncrementalProbe {
       staticFraction: staticCount / np,
       motionLevel,
       colorComplexity: this.colorSet.size,
+      gradientDensity: this.gradientSamples > 0
+        ? this.gradientPixels / this.gradientSamples : 0,
       sceneChanges,
       perFrameMotion: this.perFrameMotion,
     };

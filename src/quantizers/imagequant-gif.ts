@@ -189,6 +189,118 @@ export function remapWithPalette(
   return out;
 }
 
+// ── Unified frame encoder (single WASM call per frame) ──────
+
+export interface FrameEncodeResult {
+  indexed: Uint8Array;
+  paletteRgb: Uint8Array;
+  paletteRgba: Uint8Array;
+  paletteCount: number;
+  transparentIndex: number;
+  left: number;
+  top: number;
+  cropWidth: number;
+  cropHeight: number;
+  isEmpty: boolean;
+}
+
+export class FrameEncoderWasm {
+  private encoder: any;
+
+  constructor(width: number, height: number) {
+    const m = getMod();
+    this.encoder = new m.FrameEncoder(width, height);
+  }
+
+  setStaticMask(mask: Uint8Array): void {
+    this.encoder.set_static_mask(mask);
+  }
+
+  setImportanceMap(map: Uint8Array): void {
+    this.encoder.set_importance_map(map);
+  }
+
+  encodeKeyframe(
+    rgba: Uint8ClampedArray,
+    quality: number,
+    speed: number,
+    maxColors: number,
+  ): FrameEncodeResult {
+    const r = this.encoder.encode_keyframe(
+      new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength),
+      quality, speed, maxColors,
+    );
+    const out: FrameEncodeResult = {
+      indexed: new Uint8Array(r.indexed),
+      paletteRgb: new Uint8Array(r.palette_rgb),
+      paletteRgba: new Uint8Array(r.palette_rgba),
+      paletteCount: r.palette_count,
+      transparentIndex: r.transparent_index,
+      left: r.left,
+      top: r.top,
+      cropWidth: r.crop_width,
+      cropHeight: r.crop_height,
+      isEmpty: r.is_empty,
+    };
+    r.free();
+    return out;
+  }
+
+  encodeFrame(
+    rgba: Uint8ClampedArray,
+    staleThreshold: number,
+    frameMotion: number,
+    isQuality: boolean,
+    nextFrame: Uint8ClampedArray | null,
+    remapPalette: Uint8Array | null,
+    quality: number,
+    speed: number,
+    maxColors: number,
+    sparseRadius: number,
+  ): FrameEncodeResult {
+    const r = this.encoder.encode_frame(
+      new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength),
+      staleThreshold,
+      frameMotion,
+      isQuality,
+      nextFrame
+        ? new Uint8Array(nextFrame.buffer, nextFrame.byteOffset, nextFrame.byteLength)
+        : new Uint8Array(0),
+      remapPalette ?? new Uint8Array(0),
+      quality, speed, maxColors,
+      6, // sparseRadius
+    );
+    const out: FrameEncodeResult = {
+      indexed: new Uint8Array(r.indexed),
+      paletteRgb: new Uint8Array(r.palette_rgb),
+      paletteRgba: new Uint8Array(r.palette_rgba),
+      paletteCount: r.palette_count,
+      transparentIndex: r.transparent_index,
+      left: r.left,
+      top: r.top,
+      cropWidth: r.crop_width,
+      cropHeight: r.crop_height,
+      isEmpty: r.is_empty,
+    };
+    r.free();
+    return out;
+  }
+
+  paletteP95Distance(
+    rgba: Uint8ClampedArray,
+    paletteRgba: Uint8Array,
+  ): number {
+    return this.encoder.palette_p95_distance(
+      new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength),
+      paletteRgba,
+    );
+  }
+
+  free(): void {
+    this.encoder.free();
+  }
+}
+
 /**
  * Lanczos3 downscale via WASM — same algorithm as resize.ts but ~7x faster.
  *

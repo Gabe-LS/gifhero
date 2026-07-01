@@ -1,6 +1,46 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export class FrameEncoder {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Encode non-keyframe: transparency prep + quantize/remap + bbox +
+     * edge sparse suppression + crop + trim palette + canvas update.
+     *
+     * If `remap_palette` is non-empty, uses fast remap path.
+     * Otherwise does full quantize with background.
+     */
+    encode_frame(rgba: Uint8Array, stale_threshold: number, frame_motion: number, is_quality: boolean, next_frame: Uint8Array, remap_palette: Uint8Array, quality: number, speed: number, max_colors: number, sparse_radius: number): FrameResult;
+    /**
+     * Encode keyframe (frame 0 or scene change): full quantize, reset canvas.
+     */
+    encode_keyframe(rgba: Uint8Array, quality: number, speed: number, max_colors: number): FrameResult;
+    constructor(width: number, height: number);
+    /**
+     * Check palette fitness: p95 nearest-color distance.
+     */
+    palette_p95_distance(rgba: Uint8Array, palette_rgba: Uint8Array): number;
+    set_importance_map(map: Uint8Array): void;
+    set_static_mask(mask: Uint8Array): void;
+}
+
+export class FrameResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly crop_height: number;
+    readonly crop_width: number;
+    readonly indexed: Uint8Array;
+    readonly is_empty: boolean;
+    readonly left: number;
+    readonly palette_count: number;
+    readonly palette_rgb: Uint8Array;
+    readonly palette_rgba: Uint8Array;
+    readonly top: number;
+    readonly transparent_index: number;
+}
+
 export class QuantResult {
     private constructor();
     free(): void;
