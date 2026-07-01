@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gifhero demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #fafafa; color: #111;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 48px 24px;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 32px; }
+  .subtitle a { color: #7c3aed; text-decoration: none; }
+
+  .drop-zone {
+    width: 100%; max-width: 520px;
+    border: 2px dashed #d1d5db; border-radius: 12px;
+    padding: 48px 24px; text-align: center;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  }
+  .drop-zone:hover, .drop-zone.over { border-color: #7c3aed; background: #faf5ff; }
+  .drop-zone p { color: #666; font-size: 0.95rem; }
+  .drop-zone input { display: none; }
+
+  .status {
+    margin-top: 24px; font-size: 0.9rem; color: #666;
+    min-height: 1.4em; text-align: center;
+  }
+
+  .result {
+    margin-top: 24px; display: none; flex-direction: column;
+    align-items: center; gap: 16px; max-width: 520px; width: 100%;
+  }
+  .result.visible { display: flex; }
+  .result img {
+    max-width: 100%; border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  .result .meta { font-size: 0.85rem; color: #666; }
+  .download {
+    display: inline-block; padding: 10px 24px;
+    background: #7c3aed; color: #fff; border-radius: 8px;
+    text-decoration: none; font-weight: 500; font-size: 0.9rem;
+    transition: background 0.15s;
+  }
+  .download:hover { background: #6d28d9; }
+
+  .settings {
+    display: flex; gap: 16px; margin-top: 16px; align-items: center;
+    flex-wrap: wrap; justify-content: center;
+  }
+  .settings label { font-size: 0.85rem; color: #444; }
+  .settings select, .settings input[type="number"] {
+    padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 0.85rem; background: #fff;
+  }
+</style>
+</head>
+<body>
+
+<h1>gifhero</h1>
+<p class="subtitle">Video to GIF, in your browser. <a href="https://github.com/Gabe-LS/gifhero">GitHub</a></p>
+
+<div class="settings">
+  <label>Width <input type="number" id="width" value="480" min="60" max="1920" step="10"></label>
+  <label>FPS <input type="number" id="fps" value="15" min="1" max="30"></label>
+  <label>Max duration
+    <select id="duration">
+      <option value="5">5s</option>
+      <option value="10" selected>10s</option>
+      <option value="20">20s</option>
+    </select>
+  </label>
+</div>
+
+<div class="drop-zone" id="dropZone">
+  <p>Drop a video here or click to choose</p>
+  <input type="file" id="fileInput" accept="video/*">
+</div>
+
+<p class="status" id="status"></p>
+
+<div class="result" id="result">
+  <img id="preview" alt="Generated GIF">
+  <p class="meta" id="meta"></p>
+  <a class="download" id="downloadLink" download="gifhero-output.gif">Download GIF</a>
+</div>
+
+<script type="module">
+  import { gifhero } from "./gifhero.js";
+
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const status = document.getElementById("status");
+  const result = document.getElementById("result");
+  const preview = document.getElementById("preview");
+  const meta = document.getElementById("meta");
+  const downloadLink = document.getElementById("downloadLink");
+
+  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("over"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("over"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropZone.classList.remove("over");
+    if (e.dataTransfer.files[0]) encode(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) encode(fileInput.files[0]);
+  });
+
+  async function encode(file) {
+    result.classList.remove("visible");
+    status.textContent = "Decoding video...";
+
+    const width = parseInt(document.getElementById("width").value) || 480;
+    const fps = parseInt(document.getElementById("fps").value) || 15;
+    const duration = parseInt(document.getElementById("duration").value) || 10;
+
+    const t0 = performance.now();
+
+    try {
+      const gif = await gifhero
+        .fromFile(file)
+        .fps(fps)
+        .width(width)
+        .duration(duration)
+        .onProgress(p => {
+          if (p.phase === "extracting") {
+            status.textContent = `Decoding... ${Math.round(p.progress * 100)}%`;
+          } else {
+            status.textContent = "Encoding GIF...";
+          }
+        })
+        .toGif();
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const sizeKB = (gif.byteLength / 1024).toFixed(0);
+      const blob = new Blob([gif], { type: "image/gif" });
+      const url = URL.createObjectURL(blob);
+
+      preview.src = url;
+      meta.textContent = `${sizeKB} KB · ${elapsed}s`;
+      downloadLink.href = url;
+      result.classList.add("visible");
+      status.textContent = "";
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`;
+    }
+  }
+</script>
+
+</body>
+</html>

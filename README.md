@@ -40,6 +40,10 @@ Smaller files on every fixture at every resolution, with comparable or better qu
 
 gifski CLI is much faster (parallel quantization) but produces larger files on most content.
 
+## Try it
+
+[Live demo](https://gabe-ls.github.io/gifhero/demo/) (runs entirely in your browser, nothing uploaded)
+
 ## Install
 
 ### Browser SDK
