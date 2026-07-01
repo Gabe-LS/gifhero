@@ -8,14 +8,6 @@
       <stop offset="0%" stop-color="#d1d5db"/>
       <stop offset="100%" stop-color="#e5e7eb"/>
     </linearGradient>
-    <linearGradient id="g1r" x1="1" y1="0" x2="0" y2="0">
-      <stop offset="0%" stop-color="#7c3aed"/>
-      <stop offset="100%" stop-color="#a78bfa"/>
-    </linearGradient>
-    <linearGradient id="g2r" x1="1" y1="0" x2="0" y2="0">
-      <stop offset="0%" stop-color="#d1d5db"/>
-      <stop offset="100%" stop-color="#e5e7eb"/>
-    </linearGradient>
   </defs>
 
   <!-- Card -->
@@ -26,73 +18,79 @@
   <text x="350" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#111827">gifhero vs the field</text>
   <text x="350" y="46" text-anchor="middle" font-size="10" fill="#9ca3af">480p · 25 fixtures · default settings</text>
 
-  <!-- Column headers -->
-  <text x="155" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">FILE SIZE</text>
-  <text x="545" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">QUALITY (VMAF 0–100)</text>
+  <!-- ==================== LEFT CHART: FILE SIZE ==================== -->
 
-  <!--
-    Layout: center labels at x=350, bars extend left (size) and right (VMAF)
-    Left bars: right edge at x=290, max width 230px (magick 243%)
-    Right bars: left edge at x=410, max width 230px (magick 98.0)
+  <text x="175" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">FILE SIZE (% of gifhero)</text>
 
-    Size scale: 230px / 243% = 0.946px per %
-    VMAF scale: range 94–100, 230px / 6 = 38.3px per point
-  -->
+  <!-- Left chart bars: x starts at 80, max bar width 170px (at 243%) -->
+  <!-- Scale: 170/243 = 0.7px per % -->
 
-  <!-- Row 1: gifhero -->
-  <text x="350" y="102" text-anchor="middle" font-size="12" font-weight="600" fill="#111827">gifhero</text>
-  <!-- Size 100% → 95px, right-aligned to x=290 -->
-  <rect x="195" y="88" width="95" height="20" rx="3" fill="url(#g1r)"/>
-  <text x="189" y="102" text-anchor="end" font-size="11" fill="#7c3aed" font-weight="600">100%</text>
-  <!-- VMAF 96.8 → (96.8-94)*38.3 = 107px -->
-  <rect x="410" y="88" width="107" height="20" rx="3" fill="url(#g1)"/>
-  <text x="523" y="102" font-size="11" fill="#7c3aed" font-weight="600">96.8</text>
+  <!-- gifhero 100% → 70px -->
+  <text x="73" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
+  <rect x="80" y="89" width="70" height="18" rx="3" fill="url(#g1)"/>
+  <text x="156" y="102" font-size="10" fill="#7c3aed" font-weight="600">100%</text>
 
-  <!-- Row 2: gifski -->
-  <text x="350" y="132" text-anchor="middle" font-size="12" fill="#6b7280">gifski</text>
-  <!-- Size 104% → 98px -->
-  <rect x="192" y="118" width="98" height="20" rx="3" fill="url(#g2r)"/>
-  <text x="186" y="132" text-anchor="end" font-size="11" fill="#9ca3af">104%</text>
-  <!-- VMAF 96.1 → 80px -->
-  <rect x="410" y="118" width="80" height="20" rx="3" fill="url(#g2)"/>
-  <text x="496" y="132" font-size="11" fill="#9ca3af">96.1</text>
+  <!-- gifski 104% → 73px -->
+  <text x="73" y="130" text-anchor="end" font-size="11" fill="#6b7280">gifski</text>
+  <rect x="80" y="117" width="73" height="18" rx="3" fill="url(#g2)"/>
+  <text x="159" y="130" font-size="10" fill="#9ca3af">104%</text>
 
-  <!-- Row 3: ffmpeg+gsc -->
-  <text x="350" y="162" text-anchor="middle" font-size="12" fill="#6b7280">ffmpeg+gsc</text>
-  <!-- Size 167% → 158px -->
-  <rect x="132" y="148" width="158" height="20" rx="3" fill="url(#g2r)"/>
-  <text x="126" y="162" text-anchor="end" font-size="11" fill="#9ca3af">167%</text>
-  <!-- VMAF 97.1 → 119px -->
-  <rect x="410" y="148" width="119" height="20" rx="3" fill="url(#g2)"/>
-  <text x="535" y="162" font-size="11" fill="#9ca3af">97.1</text>
+  <!-- ffmpeg+gsc 167% → 117px -->
+  <text x="73" y="158" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg+gsc</text>
+  <rect x="80" y="145" width="117" height="18" rx="3" fill="url(#g2)"/>
+  <text x="203" y="158" font-size="10" fill="#9ca3af">167%</text>
 
-  <!-- Row 4: ffmpeg -->
-  <text x="350" y="192" text-anchor="middle" font-size="12" fill="#6b7280">ffmpeg</text>
-  <!-- Size 189% → 179px -->
-  <rect x="111" y="178" width="179" height="20" rx="3" fill="url(#g2r)"/>
-  <text x="105" y="192" text-anchor="end" font-size="11" fill="#9ca3af">189%</text>
-  <!-- VMAF 97.6 → 138px -->
-  <rect x="410" y="178" width="138" height="20" rx="3" fill="url(#g2)"/>
-  <text x="554" y="192" font-size="11" fill="#9ca3af">97.6</text>
+  <!-- ffmpeg 189% → 132px -->
+  <text x="73" y="186" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg</text>
+  <rect x="80" y="173" width="132" height="18" rx="3" fill="url(#g2)"/>
+  <text x="218" y="186" font-size="10" fill="#9ca3af">189%</text>
 
-  <!-- Row 5: magick -->
-  <text x="350" y="222" text-anchor="middle" font-size="12" fill="#6b7280">magick</text>
-  <!-- Size 243% → 230px -->
-  <rect x="60" y="208" width="230" height="20" rx="3" fill="url(#g2r)"/>
-  <text x="54" y="222" text-anchor="end" font-size="11" fill="#9ca3af">243%</text>
-  <!-- VMAF 98.0 → 153px -->
-  <rect x="410" y="208" width="153" height="20" rx="3" fill="url(#g2)"/>
-  <text x="569" y="222" font-size="11" fill="#9ca3af">98.0</text>
+  <!-- magick 243% → 170px -->
+  <text x="73" y="214" text-anchor="end" font-size="11" fill="#6b7280">magick</text>
+  <rect x="80" y="201" width="170" height="18" rx="3" fill="url(#g2)"/>
+  <text x="256" y="214" font-size="10" fill="#9ca3af">243%</text>
 
-  <!-- Axis hints -->
-  <text x="60" y="248" font-size="9" fill="#d1d5db">larger &#x25BA;</text>
-  <text x="290" y="248" text-anchor="end" font-size="9" fill="#d1d5db">&#x25C4; smaller</text>
-  <text x="410" y="248" font-size="9" fill="#d1d5db">94</text>
-  <text x="510" y="248" font-size="9" fill="#d1d5db">96</text>
-  <text x="610" y="248" font-size="9" fill="#d1d5db">98</text>
+  <text x="80" y="236" font-size="9" fill="#d1d5db">&#x25C4; smaller is better</text>
 
-  <!-- Bottom callout -->
-  <rect x="170" y="264" width="360" height="34" rx="6" fill="#f3f4f6"/>
-  <text x="350" y="280" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">Smallest files AND top-2 quality</text>
-  <text x="350" y="293" text-anchor="middle" font-size="10" fill="#9ca3af">4% smaller than gifski · +0.7 VMAF · zero lossy compression</text>
+  <!-- ==================== DIVIDER ==================== -->
+  <line x1="350" y1="62" x2="350" y2="244" stroke="#e5e7eb" stroke-width="1"/>
+
+  <!-- ==================== RIGHT CHART: QUALITY ==================== -->
+
+  <text x="525" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">QUALITY (VMAF 0–100)</text>
+
+  <!-- Right chart bars: x starts at 430, max bar width 170px -->
+  <!-- VMAF range 94–100 → 170/6 = 28.3px per point -->
+
+  <!-- gifhero 96.8 → (96.8-94)*28.3 = 79px -->
+  <text x="423" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
+  <rect x="430" y="89" width="79" height="18" rx="3" fill="url(#g1)"/>
+  <text x="515" y="102" font-size="10" fill="#7c3aed" font-weight="600">96.8</text>
+
+  <!-- gifski 96.1 → 59px -->
+  <text x="423" y="130" text-anchor="end" font-size="11" fill="#6b7280">gifski</text>
+  <rect x="430" y="117" width="59" height="18" rx="3" fill="url(#g2)"/>
+  <text x="495" y="130" font-size="10" fill="#9ca3af">96.1</text>
+
+  <!-- ffmpeg+gsc 97.1 → 88px -->
+  <text x="423" y="158" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg+gsc</text>
+  <rect x="430" y="145" width="88" height="18" rx="3" fill="url(#g2)"/>
+  <text x="524" y="158" font-size="10" fill="#9ca3af">97.1</text>
+
+  <!-- ffmpeg 97.6 → 102px -->
+  <text x="423" y="186" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg</text>
+  <rect x="430" y="173" width="102" height="18" rx="3" fill="url(#g2)"/>
+  <text x="538" y="186" font-size="10" fill="#9ca3af">97.6</text>
+
+  <!-- magick 98.0 → 113px -->
+  <text x="423" y="214" text-anchor="end" font-size="11" fill="#6b7280">magick</text>
+  <rect x="430" y="201" width="113" height="18" rx="3" fill="url(#g2)"/>
+  <text x="549" y="214" font-size="10" fill="#9ca3af">98.0</text>
+
+  <text x="600" y="236" text-anchor="end" font-size="9" fill="#d1d5db">higher is better &#x25BA;</text>
+
+  <!-- ==================== BOTTOM CALLOUT ==================== -->
+  <rect x="170" y="256" width="360" height="34" rx="6" fill="#f3f4f6"/>
+  <text x="350" y="272" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">Smallest files AND top-2 quality</text>
+  <text x="350" y="285" text-anchor="middle" font-size="10" fill="#9ca3af">4% smaller than gifski · +0.7 VMAF · zero lossy compression</text>
 </svg>
