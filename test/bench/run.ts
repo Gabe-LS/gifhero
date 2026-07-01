@@ -126,6 +126,22 @@ const ALL_ENCODERS: Record<string, { available: () => boolean; encode: EncoderFn
         { timeout: 120000, shell: "/bin/bash" });
     },
   },
+  "gifski-wasm": {
+    available: () => { try { return !!import.meta.resolve("gifski-wasm"); } catch { return false; } },
+    encode: async (framesDir, outputPath, targetWidth) => {
+      const { init, encode: encodeGifski } = await import("gifski-wasm");
+      const wasmBuf = readFileSync(join(dirname(fileURLToPath(import.meta.resolve("gifski-wasm"))), "..", "pkg", "gifski_wasm_bg.wasm"));
+      await init(wasmBuf);
+      const { width, height, frames: loadedFrames } = loadPngFrames(framesDir);
+      const rawFrames: Uint8Array[] = loadedFrames.map(f =>
+        new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength));
+      const gif = await encodeGifski({
+        frames: rawFrames, width, height, fps: 20, quality: 90,
+        ...(targetWidth && targetWidth < width ? { resizeWidth: targetWidth } : {}),
+      });
+      writeFileSync(outputPath, gif);
+    },
+  },
   "ffmpeg": {
     available: () => hasCommand("ffmpeg"),
     encode: async (framesDir, outputPath, targetWidth) => {

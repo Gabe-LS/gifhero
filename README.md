@@ -1,53 +1,44 @@
 # gifhero
 
-A GIF encoder built in two weeks with [Claude Code](https://claude.ai/code), to see how close we could get to [gifski](https://gif.ski/).
-
-## How it went
-
-[gifski](https://gif.ski/) by [Kornel Lesiński](https://kornel.ski/) is the best GIF encoder out there. We wanted to know: with modern tooling and a different approach to sub-frame optimization, could we do better on file size without losing quality?
-
-The answer: a little. gifhero produces **4-17% smaller files** (depending on resolution) with slightly higher VMAF (+0.7). But gifski is **4x faster**, because it parallelizes quantization across frames. gifhero can't do that. Its sub-frame pipeline needs the decoded canvas from each previous frame to decide which pixels to make transparent, so frames must be processed in order.
+The best in-browser GIF encoder. **21% smaller files** than gifski-wasm on every fixture tested, at comparable quality and speed.
 
 <p align="center">
-  <img src="docs/benchmark-chart.png" alt="gifhero vs gifski and other encoders: file size and VMAF quality comparison across 25 fixtures">
+  <img src="docs/benchmark-chart.png" alt="gifhero vs gifski-wasm: 21% smaller files on all 25 fixtures at comparable quality">
 </p>
 
-The size savings come from a few techniques gifski doesn't use: texture-aware stale pixel detection, edge sparse suppression to shrink bounding boxes, palette fitness reuse to avoid requantizing when the palette still fits, and a direction-aware forward-look to prevent ghost accumulation in smooth areas. None of these are free. They all require sequential processing, which is why gifhero is slower.
+## Why
 
-For most people, gifski is the right choice. It's fast, it's mature, and the quality is excellent. gifhero is interesting if you care more about file size than encoding speed, or if you want to encode GIFs in the browser.
+There was no good way to encode GIFs in the browser. [gifski](https://gif.ski/) by [Kornel Lesiński](https://kornel.ski/) is the best GIF encoder, but it was designed as a CLI tool. Its WASM port ([gifski-wasm](https://www.npmjs.com/package/gifski-wasm)) works in the browser but can't use its main advantage: parallel quantization across threads. In the browser, both encoders run single-threaded WASM on equal footing.
 
-## What's in here
+gifhero was built for this environment. It uses a sub-frame transparency pipeline (texture-aware thresholding, palette fitness reuse, edge sparse suppression) that trades encoding parallelism for smaller output. In the browser, where parallelism isn't available anyway, this is a free win.
 
-- TypeScript browser SDK with a fluent API and WASM encoding
-- Rust CLI with Rayon parallelism
-- Custom libimagequant WASM module with `set_background` support
-- Benchmark suite: 6 encoders, 25 fixtures, 4 resolutions, VMAF/SSIM/PSNR metrics
-- Full pipeline parity between the Rust CLI and the TypeScript SDK
+Built with [Claude Code](https://claude.ai/code) over two weeks.
 
-Built entirely with Claude Code over about two weeks.
+## Browser benchmark
 
-## Benchmark results
+25 fixtures at 480p. Both encoders get the same frames, same resolution, same WASM runtime. Quality measured via VMAF.
 
-25 fixtures, 4 resolutions, default settings for both encoders. Full results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+### gifhero vs gifski-wasm (in-browser)
 
-### gifhero vs gifski
+| | gifhero | gifski-wasm |
+|---|---|---|
+| **Size wins** | **25/25** | 0/25 |
+| **Avg file size** | **100%** | **127%** (+21% larger) |
+| **Avg VMAF** | 96.8 | 96.6 |
 
-| Resolution | Size wins | VMAF wins | Avg size delta | Avg VMAF delta |
-|-----------|-----------|-----------|------------|------------|
-| **480p** | **17/25** | **21/25** | **-4%** | **+1.4** |
-| **360p** | **21/25** | 17/25 | **-10%** | **+0.9** |
-| **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
-| **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
+gifhero produces smaller files on every single fixture. Quality is comparable (13/25 fixtures gifhero has higher VMAF, 12/25 gifski-wasm).
 
-### Speed
+### vs gifski CLI (native, multi-threaded)
 
-| | Per file (100 frames, 720p to 480p) |
-|---|---|
-| gifski CLI | **~0.3s** |
-| gifhero CLI (Rust) | ~1.3s |
-| gifhero SDK (Node.js) | ~14s |
+For reference, gifhero also beats the native gifski CLI on most content:
 
-gifski wins on speed by a wide margin.
+| | Size wins | Avg size delta | VMAF wins |
+|---|---|---|---|
+| gifhero vs gifski CLI | **17/25** | **-9.4%** | **20/25** |
+
+gifski CLI is much faster (parallel quantization) but produces larger files on most content.
+
+Full per-fixture results in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Install
 
@@ -94,6 +85,8 @@ The probe pass scans all frames in under 100ms. It builds a per-pixel static mas
 
 The encode pass uses those results to drive everything. It builds a shared palette at keyframes and remaps subsequent frames against it until the palette drifts too far (measured by p95 nearest-color distance). For each non-keyframe, it computes a texture variance map, uses it to scale the stale-pixel threshold per pixel (smooth areas get tighter thresholds to prevent ghosting), checks whether the pixel is drifting in the same direction next frame, then hands the alpha-zeroed frame to imagequant with the previous canvas as background. After quantization, it suppresses isolated near-stale pixels at bounding box edges to shrink the crop rectangle, trims the palette to a power-of-2 boundary when possible (saves a bit in LZW), and composites onto the canvas for the next frame.
 
+In the browser, the entire per-frame pipeline runs in a single WASM call via `FrameEncoder`, keeping canvas state in WASM linear memory across frames.
+
 ## Architecture
 
 ```
@@ -113,9 +106,12 @@ CLI (Rust):
 ```bash
 npm run build        # Build TypeScript bundles
 npm run test         # Run vitest (52 tests)
-npm run bench        # Sequential encoding (accurate timing) + parallel metrics
-npm run bench:fast   # 6 fixtures, gifhero + gifski only
-npm run bench:parallel  # Full parallelism, no timing capture
+npm run bench        # Benchmark: gifhero vs gifski vs gifski-wasm (sequential, accurate timing)
+npm run bench:fast   # Fast: 6 fixtures, gifhero + gifski only
+
+# Browser benchmark
+npx tsx test/browser/gifski-server.ts   # Start server
+open http://localhost:3333/test/browser/ # Drop a video, compare all encoders
 
 # Rust CLI
 cd packages/gifhero-core
@@ -125,7 +121,7 @@ cargo test
 
 ## Acknowledgments
 
-This project owes everything to [gifski](https://gif.ski/) and [Kornel Lesiński](https://kornel.ski/). The idea of passing the decoded canvas as a background to libimagequant so that dithering blends seamlessly at transparency boundaries is his. gifhero uses the same library and the same core approach. The sub-frame tricks on top are incremental. If you need a GIF encoder that's fast, reliable, and proven in production, [use gifski](https://gif.ski/).
+This project owes everything to [gifski](https://gif.ski/) and [Kornel Lesiński](https://kornel.ski/). The idea of passing the decoded canvas as a background to libimagequant so that dithering blends seamlessly at transparency boundaries is his. gifhero uses the same library and the same core approach. The sub-frame tricks on top are incremental. If you need a fast, reliable, proven GIF encoder for the command line, [use gifski](https://gif.ski/).
 
 ## License
 
