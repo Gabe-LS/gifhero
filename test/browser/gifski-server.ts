@@ -98,16 +98,13 @@ const server = createServer(async (req, res) => {
     try {
       const t0 = Date.now();
 
-      // Extract frames at native resolution, capped at 20s.
-      // Use -frames:v to match the browser's frame count (fps * min(duration, 20)).
-      const probeOut = execSync(
-        `ffprobe -v error -show_entries format=duration -of csv=p=0 "${inputPath}"`,
-        { timeout: 10000 },
-      ).toString().trim();
-      const duration = Math.min(parseFloat(probeOut) || 20, 20);
-      const maxFrames = Math.ceil(duration * parseInt(fps));
+      // Extract frames at native resolution.
+      // If maxFrames is provided (from browser), cap to match the browser's frame count.
+      const maxFramesFlag = parsed.fields.maxFrames
+        ? `-frames:v ${parsed.fields.maxFrames}`
+        : "-t 20";
       execSync(
-        `ffmpeg -y -i "${inputPath}" -vf "fps=${fps}" -frames:v ${maxFrames} "${framesDir}/%04d.png"`,
+        `ffmpeg -y -i "${inputPath}" -vf "fps=${fps}" ${maxFramesFlag} "${framesDir}/%04d.png"`,
         { stdio: "ignore", timeout: 60000 },
       );
       const frameCount = readdirSync(framesDir).filter(f => f.endsWith(".png")).length;
@@ -162,12 +159,11 @@ const server = createServer(async (req, res) => {
     try {
       const t0 = Date.now();
 
-      // Cap duration to match the browser's 20s limit
-      const probeOut = execSync(
-        `ffprobe -v error -show_entries format=duration -of csv=p=0 "${inputPath}"`,
-        { timeout: 10000 },
-      ).toString().trim();
-      const maxDur = Math.min(parseFloat(probeOut) || 20, 20);
+      // If maxFrames provided, compute maxDuration = maxFrames / fps to match browser frame count.
+      // Otherwise cap at 20s.
+      const maxDur = parsed.fields.maxFrames
+        ? (parseInt(parsed.fields.maxFrames) / parseInt(fps)).toFixed(2)
+        : "20";
 
       execSync(
         `"${gifheroBin}" "${inputPath}" -w ${width} --fps ${fps} --max-duration ${maxDur} --preset ${preset} -o "${outputPath}" -q`,
