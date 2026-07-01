@@ -1,51 +1,65 @@
 # Benchmark Results
 
-25 fixtures × 4 resolutions. gifhero vs gifski (default settings, no lossy LZW).
-Quality measured via ffmpeg libvmaf. All results reproducible: `npm run bench`
+25 fixtures, 4 resolutions, 8 encoders. Quality measured via ffmpeg libvmaf + SSIM.
+All results reproducible: `npm run bench`
 
-## gifhero vs gifski — summary
+## gifhero vs gifski-wasm (in-browser comparison)
 
-| Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
-|-----------|-----------|-----------|------------|------------|
-| **480p** | **17/25** | **21/25** | **-4%** | **+1.4** |
-| **360p** | **21/25** | 17/25 | **-10%** | **+0.9** |
-| **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
-| **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
+Both run single-threaded WASM. Same input frames, same runtime.
 
-Smaller files AND better VMAF at every resolution. No lossy LZW.
+| Resolution | Size wins | Avg size delta | Avg VMAF (gifhero / gifski-wasm) |
+|---|---|---|---|
+| **480p** | **25/25** | **-21%** | 97.2 / 96.2 |
+| **360p** | **25/25** | **-28%** | 96.5 / 96.0 |
+| **240p** | **25/25** | **-28%** | 96.6 / 95.8 |
+| **160p** | **25/25** | **-30%** | 96.6 / 95.8 |
+
+gifhero produces smaller files on every fixture at every resolution.
+
+## gifhero vs gifski CLI (native, multi-threaded)
+
+| Resolution | Size wins | Avg size delta | VMAF wins |
+|---|---|---|---|
+| **480p** | **17/25** | **-10%** | **20/25** |
+| **360p** | **21/25** | **-16%** | 16/25 |
+| **240p** | **22/25** | **-19%** | 18/25 |
+| **160p** | **24/25** | **-23%** | 16/25 |
+
+gifski CLI is faster (parallel quantization) but produces larger files on most content.
 
 ---
 
 ## Per-fixture results (480p)
 
-| Fixture | gifhero | gifski | Size Δ | VMAF Δ | Content type |
-|---------|---------|--------|--------|--------|------|
-| screencast | 16 KB | 50 KB | **-66%** | -0.9 | UI recording |
-| candle-flame | 147 KB | 218 KB | **-32%** | +0.2 | Low light |
-| skin-tones | 122 KB | 179 KB | **-32%** | -0.3 | Portrait |
-| pixel-art | 254 KB | 360 KB | **-30%** | -0.9 | Pixel art |
-| bbb-clip-01 | 4,021 KB | 4,775 KB | **-16%** | +0.4 | Animation |
-| bbb-clip-10 | 3,771 KB | 4,450 KB | **-15%** | +0.0 | Animation |
-| screen-recording | 622 KB | 718 KB | **-13%** | -0.2 | Screen capture |
-| big-buck-bunny | 2,806 KB | 3,172 KB | **-12%** | +1.8 | Animation |
-| bbb-clip-04 | 1,866 KB | 2,102 KB | **-11%** | +0.3 | Animation |
-| city-night | 3,741 KB | 4,181 KB | **-11%** | +0.6 | Urban |
-| shapes | 355 KB | 398 KB | **-11%** | +2.0 | Synthetic |
-| bbb-clip-07 | 2,405 KB | 2,660 KB | **-10%** | +18.0 | Animation |
-| bbb-clip-09 | 1,629 KB | 1,730 KB | **-6%** | +0.9 | Animation |
-| black-and-white | 11,798 KB | 12,366 KB | **-5%** | +0.0 | High contrast |
-| sintel | 1,396 KB | 1,456 KB | **-4%** | +1.2 | CGI film |
-| bbb-clip-05 | 2,204 KB | 2,269 KB | **-3%** | +0.8 | Nature |
-| bbb-clip-06 | 1,474 KB | 1,473 KB | +0% | +0.6 | Animation |
-| bbb-clip-02 | 3,889 KB | 3,805 KB | +2% | +1.6 | Animation |
-| color-wheel | 4,400 KB | 4,303 KB | +2% | +0.5 | Gradient |
-| jellyfish | 3,023 KB | 2,938 KB | +3% | +1.0 | Nature |
-| bbb-clip-03 | 1,410 KB | 1,357 KB | +4% | +1.1 | Animation |
-| bbb-clip-08 | 6,787 KB | 6,514 KB | +4% | +0.4 | Animation |
-| talking-head | 1,384 KB | 1,222 KB | +13% | +1.6 | Webcam |
-| fast-action | 3,869 KB | 3,281 KB | +18% | +3.6 | Sports |
+| Fixture | gifhero | gifski-wasm | gifski CLI | vs wasm | vs CLI | VMAF (h/w/s) |
+|---------|---------|-------------|------------|---------|--------|--------------|
+| screencast | 16 KB | 50 KB | 50 KB | -66% | -66% | 96.6 / 97.5 / 97.5 |
+| candle-flame | 147 KB | 247 KB | 218 KB | -40% | -32% | 97.0 / 97.2 / 96.7 |
+| bbb-clip-10 | 3,773 KB | 6,002 KB | 4,450 KB | -37% | -15% | 100.0 / 100.0 / 100.0 |
+| skin-tones | 122 KB | 194 KB | 179 KB | -37% | -32% | 96.8 / 96.9 / 97.1 |
+| pixel-art | 254 KB | 394 KB | 360 KB | -35% | -30% | 98.0 / 98.9 / 98.9 |
+| black-and-white | 11,797 KB | 17,672 KB | 12,366 KB | -33% | -5% | 99.9 / 99.9 / 99.9 |
+| sintel | 1,396 KB | 1,991 KB | 1,456 KB | -30% | -4% | 98.6 / 97.9 / 97.3 |
+| bbb-clip-07 | 2,387 KB | 3,354 KB | 2,660 KB | -29% | -10% | 95.9 / 75.3 / 77.4 |
+| screen-recording | 622 KB | 823 KB | 718 KB | -24% | -13% | 98.0 / 98.1 / 98.2 |
+| shapes | 354 KB | 468 KB | 398 KB | -24% | -11% | 96.1 / 94.1 / 94.0 |
+| bbb-clip-01 | 4,021 KB | 5,020 KB | 4,775 KB | -20% | -16% | 94.4 / 94.9 / 94.0 |
+| fast-action | 3,869 KB | 4,792 KB | 3,281 KB | -19% | +18% | 99.9 / 98.2 / 96.4 |
+| bbb-clip-04 | 1,866 KB | 2,306 KB | 2,102 KB | -19% | -11% | 95.7 / 96.1 / 95.4 |
+| big-buck-bunny | 2,806 KB | 3,456 KB | 3,172 KB | -19% | -12% | 93.7 / 93.9 / 91.9 |
+| bbb-clip-05 | 2,200 KB | 2,686 KB | 2,269 KB | -18% | -3% | 98.3 / 98.3 / 97.5 |
+| city-night | 3,739 KB | 4,454 KB | 4,181 KB | -16% | -11% | 97.7 / 97.6 / 97.2 |
+| bbb-clip-06 | 1,476 KB | 1,677 KB | 1,473 KB | -12% | +0% | 95.3 / 95.3 / 94.6 |
+| bbb-clip-09 | 1,629 KB | 1,847 KB | 1,730 KB | -12% | -6% | 96.6 / 96.1 / 95.7 |
+| bbb-clip-08 | 6,586 KB | 7,341 KB | 6,514 KB | -10% | +1% | 98.8 / 98.8 / 98.4 |
+| bbb-clip-03 | 1,410 KB | 1,536 KB | 1,357 KB | -8% | +4% | 95.9 / 95.4 / 94.8 |
+| bbb-clip-02 | 3,889 KB | 4,110 KB | 3,805 KB | -5% | +2% | 95.1 / 94.5 / 93.5 |
+| two-frame | 0 KB | 0 KB | 0 KB | -5% | -5% | 98.7 / 98.7 / 98.7 |
+| talking-head | 1,384 KB | 1,456 KB | 1,222 KB | -5% | +13% | 96.6 / 95.9 / 95.0 |
+| jellyfish | 3,018 KB | 3,120 KB | 2,938 KB | -3% | +3% | 98.3 / 97.8 / 97.3 |
+| color-wheel | 4,400 KB | 4,536 KB | 4,303 KB | -3% | +2% | 98.5 / 98.5 / 98.0 |
 
-17/25 fixtures smaller than gifski at 480p. On 7 of the 8 where gifski is smaller, gifhero has higher VMAF.
+Sorted by size delta vs gifski-wasm. gifhero is smaller on all 25 fixtures vs gifski-wasm. gifhero is smaller on 17/25 vs gifski CLI; on 6 of the 8 where gifski CLI is smaller, gifhero has higher VMAF.
 
 ---
 
@@ -53,53 +67,31 @@ Smaller files AND better VMAF at every resolution. No lossy LZW.
 
 Six techniques drive the compression advantage:
 
-1. **Static pixel detection** — probe identifies pixels that never change across all frames; these become unconditionally transparent
-2. **Canvas-aware quantization** — imagequant's `set_background` blends dithering with the decoded canvas, making transparency boundaries invisible
-3. **Palette fitness model** — builds a shared palette at keyframes, remaps subsequent frames via fast remap; triggers full per-frame quantization when p95 nearest-color distance exceeds threshold (prevents gradient posterization)
-4. **Adaptive maxColors** — gradient density × color complexity from the probe determines optimal palette size per clip (256 for gradient-heavy, 160 for texture-dominant). Validated via 72-point sweep across 12 fixtures × 6 maxColors values
-5. **Edge sparse suppression** — isolated near-stale pixels at the bbox boundary are suppressed to shrink the crop rectangle without affecting interior quality
-6. **Power-of-2 palette targeting** — unused entries evicted to cross bit boundaries, reducing LZW minimum code size
+1. **Static pixel detection**: probe identifies pixels that never change; these become unconditionally transparent
+2. **Canvas-aware quantization**: imagequant's `set_background` blends dithering with the decoded canvas, making transparency boundaries invisible
+3. **Palette fitness model**: builds a shared palette at keyframes, remaps subsequent frames via fast remap; triggers full quantization when p95 nearest-color distance exceeds 8
+4. **Adaptive maxColors**: gradient density x color complexity from the probe determines optimal palette size (256 for gradient-heavy, 160 for texture-dominant)
+5. **Edge sparse suppression**: isolated near-stale pixels at bbox edges are suppressed to shrink the crop rectangle
+6. **Power-of-2 palette targeting**: unused entries evicted to cross bit boundaries, reducing LZW minimum code size
 
-### Where gifski wins
+### Where gifski CLI wins
 
-gifski produces smaller files on high-motion content with spatially sparse changes (talking-head, fast-action). The root cause: GIF's single-rectangle-per-frame format. When changed pixels span the full frame width but are scattered, the bounding box is nearly full-size and the indexed data contains alternating transparent/opaque runs that LZW compresses poorly. gifski's LZW-aware dithering (written by the imagequant author) produces more compressible indexed patterns on these cases.
+gifski CLI produces smaller files on high-motion content with spatially sparse changes (talking-head, fast-action). With frequent scene changes, gifhero's sub-frame pipeline has no temporal coherence to exploit. gifski's parallel quantization is better suited to content where every frame is effectively a keyframe.
 
 ---
 
-## Encode speed
+## Encoders
 
-| Encoder | Avg time (480p) | Relative |
-|---------|----------------|----------|
-| gifski | ~350 ms | 1.0× |
-| **gifhero** | **~7s** | **~20×** |
-
-gifhero is slower due to sequential canvas-dependent encoding (each frame's transparency depends on the previous decoded frame). The WASM imagequant quantize step is ~50% of encoding time.
-
-### Per-stage timing breakdown (bbb-clip-01, 100 frames, 480p)
-
-| Stage | Time | % |
-|-------|------|---|
-| quantize | ~4s | 50% |
-| transparency | ~0.6s | 8% |
-| write (LZW + GIF) | ~0.3s | 4% |
-| denoise | ~0.2s | 3% |
-| probe | ~0.1s | 2% |
-
-### Benchmark tool parallelism
-
-| Mode | Encoding | Metrics | Use case |
-|------|----------|---------|----------|
-| Default (`npm run bench`) | Sequential (accurate timing) | 8-wide parallel | Benchmarking |
-| Parallel (`npm run bench:parallel`) | 8 workers + 8 concurrent processes | 8-wide parallel | Fast testing (~5× faster) |
-
-Worker thread concurrency sweep (8 gifhero jobs):
-
-| Workers | Wall clock | Speedup |
-|---------|-----------|---------|
-| 1 | 81.7s | 1.0× |
-| 2 | 46.2s | 1.8× |
-| 4 | 28.0s | 2.9× |
-| 8 | 14.6s | **5.6×** |
+| Encoder | Type | Description |
+|---------|------|-------------|
+| **gifhero-wasm** | WASM (browser) | gifhero TS SDK with WASM FrameEncoder. Same pipeline as browser. |
+| **gifhero** | Native CLI | Rust CLI with Rayon parallelism. Same algorithm as gifhero-wasm. |
+| **gifski-wasm** | WASM (browser) | gifski-wasm npm package. Same quantizer, no multi-threading. |
+| **gifski** | Native CLI | gifski CLI with multi-threaded quantization. |
+| **ffmpeg** | Native CLI | ffmpeg palettegen + paletteuse (full stats, Floyd-Steinberg). |
+| **ffmpeg-hq** | Native CLI | ffmpeg palettegen per frame (single stats). |
+| **ffmpeg+gifsicle** | Native CLI | ffmpeg + gifsicle -O3 --lossy=80. |
+| **magick** | Native CLI | ImageMagick with Floyd-Steinberg + OptimizePlus. |
 
 ---
 
@@ -107,33 +99,23 @@ Worker thread concurrency sweep (8 gifhero jobs):
 
 - **25 fixtures**: Big Buck Bunny clips (10), Sintel, screencasts, talking heads, fast action, jellyfish, gradients, pixel art, skin tones, candle flame, shapes, black-and-white
 - **4 resolutions**: 480p, 360p, 240p, 160p
-- **2 encoders**: gifhero (balanced preset q90, lossyLzw=0), gifski (default quality 90)
-- **Comparison basis**: each encoder at its recommended default settings, no lossy LZW
-
-### Quality metrics
-
-| Metric | Source | Measures |
-|--------|--------|----------|
-| VMAF | ffmpeg libvmaf | Perceptual quality (0-100, higher = better) |
-| DSSIM | dssim CLI | Per-frame structural dissimilarity (lower = better) |
+- **8 encoders**: all at default settings
+- **gifhero**: balanced preset (q90, speed 4, no lossy LZW)
+- **gifski CLI**: default quality (q100)
+- **gifski-wasm**: quality 90 (matching gifhero)
+- **Quality**: VMAF + SSIM via ffmpeg libvmaf
 
 ### Running benchmarks
 
 ```bash
-# Full suite (25 fixtures × 4 resolutions)
-npm run bench
+npm run bench                    # All encoders, sequential (accurate timing)
+npm run bench:fast               # 6 fixtures, gifhero + gifski only
+npm run bench:parallel           # Full parallelism, no timing
 
-# Fast mode (6 fixtures, gifhero + gifski only)
-npm run bench:fast
-
-# Parallel mode (~5× faster, no timing capture)
-npm run bench:parallel
-
-# Specific fixtures/encoders
-npx tsx test/bench/run.ts --fixtures bbb-clip-01,talking-head --encoders gifhero,gifski
-
-# List available fixtures and encoders
+# Custom runs
 npx tsx test/bench/run.ts --list
+npx tsx test/bench/run.ts --fixtures bbb-clip-01,talking-head
+npx tsx test/bench/run.ts --encoders gifhero-wasm,gifski-wasm --metrics vmaf
 ```
 
-Results are saved to `test/bench/results/{timestamp}/` with a `latest` symlink. Open `test/bench/viewer.html` for A/B visual comparison.
+Results saved to `test/bench/results/{timestamp}/` with a `latest` symlink. Open `docs/viewer/index.html` for A/B visual comparison.
