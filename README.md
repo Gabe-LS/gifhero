@@ -1,6 +1,6 @@
 # gifhero
 
-The best in-browser GIF encoder. **21-30% smaller files** than gifski-wasm on every fixture at every resolution, with comparable or better quality.
+A GIF encoder built for the browser. Produces **21-30% smaller files** than gifski-wasm on every fixture at every resolution, with comparable or better quality.
 
 <p align="center">
   <img src="docs/benchmark-chart.png" alt="gifhero vs gifski-wasm: 21% smaller files on all 25 fixtures at comparable quality">
