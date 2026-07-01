@@ -7,12 +7,12 @@ Quality measured via ffmpeg libvmaf. All results reproducible: `npm run bench`
 
 | Resolution | Size wins | VMAF wins | Avg size Δ | Avg VMAF Δ |
 |-----------|-----------|-----------|------------|------------|
-| **480p** | 14/25 | **22/25** | +3% | **+1.4** |
-| **360p** | **17/25** | **19/25** | **-3%** | **+1.1** |
-| **240p** | **19/25** | **18/25** | **-5%** | **+1.2** |
-| **160p** | **22/25** | **17/25** | **-10%** | **+1.3** |
+| **480p** | **17/25** | **21/25** | **-4%** | **+1.4** |
+| **360p** | **21/25** | 17/25 | **-10%** | **+0.9** |
+| **240p** | **22/25** | 19/25 | **-13%** | **+1.2** |
+| **160p** | **24/25** | 17/25 | **-17%** | **+1.3** |
 
-gifhero produces smaller files on most fixtures at ≤360p with better VMAF across all resolutions. At 480p, gifhero trades slightly larger files (+3% average) for significantly better quality (+1.4 VMAF average, 22/25 wins).
+Smaller files AND better VMAF at every resolution. No lossy LZW.
 
 ---
 
@@ -20,32 +20,32 @@ gifhero produces smaller files on most fixtures at ≤360p with better VMAF acro
 
 | Fixture | gifhero | gifski | Size Δ | VMAF Δ | Content type |
 |---------|---------|--------|--------|--------|------|
-| screencast | 17 KB | 50 KB | **-66%** | -0.5 | UI recording |
-| skin-tones | 131 KB | 179 KB | **-27%** | -0.2 | Portrait |
-| pixel-art | 267 KB | 360 KB | **-26%** | -0.8 | Pixel art |
-| candle-flame | 179 KB | 218 KB | **-18%** | +0.5 | Low light |
+| screencast | 16 KB | 50 KB | **-66%** | -0.9 | UI recording |
+| candle-flame | 147 KB | 218 KB | **-32%** | +0.2 | Low light |
+| skin-tones | 122 KB | 179 KB | **-32%** | -0.3 | Portrait |
+| pixel-art | 254 KB | 360 KB | **-30%** | -0.9 | Pixel art |
 | bbb-clip-01 | 4,021 KB | 4,775 KB | **-16%** | +0.4 | Animation |
+| bbb-clip-10 | 3,771 KB | 4,450 KB | **-15%** | +0.0 | Animation |
+| screen-recording | 622 KB | 718 KB | **-13%** | -0.2 | Screen capture |
 | big-buck-bunny | 2,806 KB | 3,172 KB | **-12%** | +1.8 | Animation |
 | bbb-clip-04 | 1,866 KB | 2,102 KB | **-11%** | +0.3 | Animation |
 | city-night | 3,741 KB | 4,181 KB | **-11%** | +0.6 | Urban |
+| shapes | 355 KB | 398 KB | **-11%** | +2.0 | Synthetic |
+| bbb-clip-07 | 2,405 KB | 2,660 KB | **-10%** | +18.0 | Animation |
 | bbb-clip-09 | 1,629 KB | 1,730 KB | **-6%** | +0.9 | Animation |
-| shapes | 380 KB | 398 KB | **-4%** | +2.2 | Synthetic |
-| bbb-clip-07 | 2,543 KB | 2,660 KB | **-4%** | +18.0 | Animation |
+| black-and-white | 11,798 KB | 12,366 KB | **-5%** | +0.0 | High contrast |
+| sintel | 1,396 KB | 1,456 KB | **-4%** | +1.2 | CGI film |
 | bbb-clip-05 | 2,204 KB | 2,269 KB | **-3%** | +0.8 | Nature |
-| screen-recording | 701 KB | 718 KB | **-2%** | +0.0 | Screen capture |
 | bbb-clip-06 | 1,474 KB | 1,473 KB | +0% | +0.6 | Animation |
-| bbb-clip-10 | 4,458 KB | 4,450 KB | +0% | +0.0 | Animation |
 | bbb-clip-02 | 3,889 KB | 3,805 KB | +2% | +1.6 | Animation |
 | color-wheel | 4,400 KB | 4,303 KB | +2% | +0.5 | Gradient |
 | jellyfish | 3,023 KB | 2,938 KB | +3% | +1.0 | Nature |
 | bbb-clip-03 | 1,410 KB | 1,357 KB | +4% | +1.1 | Animation |
 | bbb-clip-08 | 6,787 KB | 6,514 KB | +4% | +0.4 | Animation |
-| sintel | 1,610 KB | 1,456 KB | +11% | +1.2 | CGI film |
-| black-and-white | 13,951 KB | 12,366 KB | +13% | +0.0 | High contrast |
 | talking-head | 1,384 KB | 1,222 KB | +13% | +1.6 | Webcam |
-| fast-action | 4,874 KB | 3,281 KB | +49% | +3.6 | Sports |
+| fast-action | 3,869 KB | 3,281 KB | +18% | +3.6 | Sports |
 
-14/25 fixtures smaller than gifski at 480p. On 10 of the 11 where gifski is smaller, gifhero has higher VMAF — a quality-over-size trade-off from the adaptive stale threshold.
+17/25 fixtures smaller than gifski at 480p. On 7 of the 8 where gifski is smaller, gifhero has higher VMAF.
 
 ---
 
@@ -62,7 +62,7 @@ Six techniques drive the compression advantage:
 
 ### Where gifski wins
 
-gifski produces smaller files on high-motion content with spatially sparse changes (talking-head, fast-action, sintel). The root cause: GIF's single-rectangle-per-frame format. When changed pixels span the full frame width but are scattered, the bounding box is nearly full-size and the indexed data contains alternating transparent/opaque runs that LZW compresses poorly. gifski's LZW-aware dithering (written by the imagequant author) produces more compressible indexed patterns on these cases.
+gifski produces smaller files on high-motion content with spatially sparse changes (talking-head, fast-action). The root cause: GIF's single-rectangle-per-frame format. When changed pixels span the full frame width but are scattered, the bounding box is nearly full-size and the indexed data contains alternating transparent/opaque runs that LZW compresses poorly. gifski's LZW-aware dithering (written by the imagequant author) produces more compressible indexed patterns on these cases.
 
 ---
 
@@ -107,7 +107,7 @@ Worker thread concurrency sweep (8 gifhero jobs):
 
 - **25 fixtures**: Big Buck Bunny clips (10), Sintel, screencasts, talking heads, fast action, jellyfish, gradients, pixel art, skin tones, candle flame, shapes, black-and-white
 - **4 resolutions**: 480p, 360p, 240p, 160p
-- **2 encoders**: gifhero (balanced preset, lossyLzw=0), gifski (default quality 90)
+- **2 encoders**: gifhero (balanced preset q90, lossyLzw=0), gifski (default quality 90)
 - **Comparison basis**: each encoder at its recommended default settings, no lossy LZW
 
 ### Quality metrics
