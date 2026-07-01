@@ -121,7 +121,7 @@ cargo test
 
 ## Acknowledgments
 
-This project owes everything to [gifski](https://gif.ski/) and [Kornel Lesiński](https://kornel.ski/). The idea of passing the decoded canvas as a background to libimagequant so that dithering blends seamlessly at transparency boundaries is his. gifhero uses the same library and the same core approach. The sub-frame tricks on top are incremental. If you need a fast, reliable, proven GIF encoder for the command line, [use gifski](https://gif.ski/).
+This project owes everything to [gifski](https://gif.ski/) and [Kornel Lesiński](https://kornel.ski/). The idea of passing the decoded canvas as a background to libimagequant so that dithering blends seamlessly at transparency boundaries is his. gifhero uses the same library and the same core approach. The sub-frame tricks on top are incremental. If you need a fast, reliable, proven GIF encoder for the command line, use [gifski](https://gif.ski/).
 
 ## License
 
