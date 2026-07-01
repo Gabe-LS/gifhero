@@ -57,6 +57,11 @@ const gif = await gifhero
 ### Native CLI
 
 ```bash
+brew install Gabe-LS/tap/gifhero
+```
+
+Or build from source:
+```bash
 cd packages/gifhero-core
 cargo build --release --features cli
 ```
