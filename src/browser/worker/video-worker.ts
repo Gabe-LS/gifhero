@@ -165,7 +165,7 @@ self.onmessage = async (e: MessageEvent<VideoEncodeRequest>) => {
     wlog(`Done: ${(gif.byteLength / 1024).toFixed(0)} KB in ${(totalMs / 1000).toFixed(1)}s (decode ${(extractMs / 1000).toFixed(1)}s + encode ${(encodeMs / 1000).toFixed(1)}s)`);
 
     const buf = gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength);
-    (self as any).postMessage({ type: "result", id, gif: buf }, [buf]);
+    (self as any).postMessage({ type: "result", id, gif: buf, frameCount: frames.length }, [buf]);
   } catch (err) {
     console.error(`[gifhero-video ${new Date().toISOString().slice(11, 23)}] Error:`, err);
     (self as any).postMessage({ type: "error", id, message: (err as Error).message });

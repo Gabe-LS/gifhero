@@ -180,40 +180,12 @@
         const gifskiEncodeTime = (gifskiResult.encodeTime / 1000).toFixed(1);
         console.log(`[benchmark] gifski-wasm: ${(gifskiGif.byteLength/1024).toFixed(0)} KB in ${gifskiTime.toFixed(1)}s (encode only: ${gifskiEncodeTime}s)`);
 
-        // Count frames in the gifhero GIF output so CLIs encode the same number
-        let browserFrameCount = 0;
-        { // Parse GIF frame count from the binary
-          const d = new DataView(gifheroGif.buffer, gifheroGif.byteOffset, gifheroGif.byteLength);
-          let pos = 13; // skip header + LSD
-          if (gifheroGif[10] & 0x80) pos += 3 * (1 << ((gifheroGif[10] & 7) + 1)); // skip GCT
-          while (pos < gifheroGif.byteLength) {
-            const block = gifheroGif[pos];
-            if (block === 0x3B) break; // trailer
-            if (block === 0x21) { // extension
-              const label = gifheroGif[pos + 1];
-              pos += 2;
-              while (pos < gifheroGif.byteLength) {
-                const sz = gifheroGif[pos++];
-                if (sz === 0) break;
-                pos += sz;
-              }
-            } else if (block === 0x2C) { // image descriptor
-              browserFrameCount++;
-              pos += 9;
-              if (gifheroGif[pos] & 0x80) pos += 3 * (1 << ((gifheroGif[pos] & 7) + 1));
-              pos++; // min code size
-              while (pos < gifheroGif.byteLength) {
-                const sz = gifheroGif[pos++];
-                if (sz === 0) break;
-                pos += sz;
-              }
-            } else break;
-          }
-        }
+        // Read actual frame count from the gifhero video worker
+        const browserFrameCount = window.__gifheroLastFrameCount || 0;
         console.log(`[benchmark] Browser frame count: ${browserFrameCount}`);
 
-        // ── gifhero CLI (native Rayon) ──
-        progress.textContent = "gifhero CLI (native Rayon): encoding on server...";
+        // ── gifhero Node.js ──
+        progress.textContent = "gifhero Node.js: encoding on server...";
         let gifheroCliFormData = new FormData();
         gifheroCliFormData.append("video", file);
         gifheroCliFormData.append("fps", String(fps));
@@ -286,6 +258,7 @@
       }
 
       benchStart.disabled = false;
+      window.__benchDone = true;
     });
 
     // ── Canvas drawing ──

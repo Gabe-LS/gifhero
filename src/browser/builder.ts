@@ -206,6 +206,9 @@ export class GifHeroBuilder {
           });
         } else if (e.data.type === "result") {
           log(`Received GIF from video worker: ${(e.data.gif.byteLength / 1024).toFixed(0)} KB`);
+          if (e.data.frameCount && typeof self !== "undefined") {
+            (self as any).__gifheroLastFrameCount = e.data.frameCount;
+          }
           worker.terminate();
           resolve(new Uint8Array(e.data.gif));
         } else if (e.data.type === "error") {

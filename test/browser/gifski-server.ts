@@ -4,9 +4,9 @@
  * Run: npx tsx test/browser/gifski-server.ts
  * Open: http://localhost:3333/test/browser/
  *
- * Provides /api/gifski and /api/gifhero endpoints for CLI comparison.
- * Both endpoints extract frames with the same ffmpeg pipeline so the
- * input is identical. Both encoders run at their default settings.
+ * Both CLI endpoints extract frames with the same ffmpeg pipeline at the
+ * same snapped resolution the browser uses (3x target, integer ratio),
+ * so all four encoders get equivalent input.
  */
 
 import { createServer } from "http";
@@ -73,10 +73,62 @@ function parseMultipart(body: Buffer, contentType: string) {
   return { videoData, fileExt, fields };
 }
 
+/**
+ * Compute the snapped extraction size matching the browser's 3:1 logic.
+ * Same algorithm as video-worker.ts lines 62-76.
+ */
+function computeExtractSize(srcW: number, srcH: number, targetWidth: number) {
+  const longestSrc = Math.max(srcW, srcH);
+  let extractW = srcW;
+  let extractH = srcH;
+  if (targetWidth < longestSrc) {
+    const idealLong = targetWidth * 3;
+    if (longestSrc > idealLong * 1.15) {
+      const snapRatio = Math.round(longestSrc / idealLong);
+      if (snapRatio >= 2) {
+        extractW = Math.round(srcW / snapRatio);
+        extractH = Math.round(srcH / snapRatio);
+      }
+    }
+  }
+  return { extractW, extractH };
+}
+
+/**
+ * Extract frames with ffmpeg at the snapped resolution,
+ * matching the browser's extraction approach.
+ */
+function extractFrames(
+  inputPath: string, framesDir: string,
+  fps: string, targetWidth: number, maxFrames?: number,
+) {
+  // Probe source dimensions
+  const probeOut = execSync(
+    `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "${inputPath}"`,
+    { timeout: 10000 },
+  ).toString().trim();
+  const [srcW, srcH] = probeOut.split("x").map(Number);
+
+  // Compute snapped extraction size (same as browser)
+  const { extractW, extractH } = computeExtractSize(srcW, srcH, targetWidth);
+
+  const maxFramesFlag = maxFrames ? `-frames:v ${maxFrames}` : "-t 20";
+  const scaleFilter = (extractW < srcW)
+    ? `fps=${fps},scale=${extractW}:${extractH}:flags=lanczos`
+    : `fps=${fps}`;
+
+  execSync(
+    `ffmpeg -y -i "${inputPath}" -vf "${scaleFilter}" ${maxFramesFlag} "${framesDir}/%04d.png"`,
+    { stdio: "ignore", timeout: 60000 },
+  );
+
+  const frameCount = readdirSync(framesDir).filter(f => f.endsWith(".png")).length;
+  console.log(`[extract] ${srcW}x${srcH} → ${extractW}x${extractH}, ${frameCount} frames`);
+  return { frameCount, extractW, extractH };
+}
+
 const server = createServer(async (req, res) => {
   // ── /api/gifski endpoint ──
-  // gifski CLI needs pre-extracted PNG frames (no video input).
-  // Frames extracted at native resolution; gifski handles downscaling via --width.
   if (req.method === "POST" && req.url === "/api/gifski") {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -84,7 +136,8 @@ const server = createServer(async (req, res) => {
     if (!parsed?.videoData) { res.writeHead(400); res.end("No video file"); return; }
 
     const fps = parsed.fields.fps ?? "20";
-    const width = parsed.fields.width ?? "480";
+    const width = parseInt(parsed.fields.width ?? "480");
+    const maxFrames = parsed.fields.maxFrames ? parseInt(parsed.fields.maxFrames) : undefined;
 
     const tmpDir = join(tmpdir(), "gifhero-bench-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
@@ -97,19 +150,8 @@ const server = createServer(async (req, res) => {
 
     try {
       const t0 = Date.now();
+      const { frameCount } = extractFrames(inputPath, framesDir, fps, width, maxFrames);
 
-      // Extract frames at native resolution.
-      // If maxFrames is provided (from browser), cap to match the browser's frame count.
-      const maxFramesFlag = parsed.fields.maxFrames
-        ? `-frames:v ${parsed.fields.maxFrames}`
-        : "-t 20";
-      execSync(
-        `ffmpeg -y -i "${inputPath}" -vf "fps=${fps}" ${maxFramesFlag} "${framesDir}/%04d.png"`,
-        { stdio: "ignore", timeout: 60000 },
-      );
-      const frameCount = readdirSync(framesDir).filter(f => f.endsWith(".png")).length;
-
-      // gifski at default settings with its own internal downscaling
       execSync(
         `gifski --fps ${fps} --width ${width} -o "${outputPath}" "${framesDir}"/*.png`,
         { stdio: "ignore", timeout: 120000, shell: "/bin/bash" },
@@ -117,7 +159,7 @@ const server = createServer(async (req, res) => {
 
       const gif = readFileSync(outputPath);
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`[gifski CLI] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${frameCount} frames, ${fps}fps, ${width}px, default q)`);
+      console.log(`[gifski CLI] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${frameCount} frames, ${fps}fps, ${width}px)`);
 
       res.writeHead(200, {
         "Content-Type": "image/gif",
@@ -136,7 +178,8 @@ const server = createServer(async (req, res) => {
   }
 
   // ── /api/gifhero endpoint ──
-  // gifhero CLI accepts video files directly (has its own ffmpeg pipeline)
+  // Uses the Node.js SDK (same pipeline as browser) so both get the same
+  // snapped-resolution PNGs. The Rust CLI can't read PNG sequences.
   if (req.method === "POST" && req.url === "/api/gifhero") {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -144,35 +187,50 @@ const server = createServer(async (req, res) => {
     if (!parsed?.videoData) { res.writeHead(400); res.end("No video file"); return; }
 
     const fps = parsed.fields.fps ?? "20";
-    const width = parsed.fields.width ?? "480";
-    const preset = parsed.fields.preset ?? "balanced";
+    const width = parseInt(parsed.fields.width ?? "480");
+    const preset = (parsed.fields.preset ?? "balanced") as "quality" | "balanced";
+    const maxFrames = parsed.fields.maxFrames ? parseInt(parsed.fields.maxFrames) : undefined;
 
     const tmpDir = join(tmpdir(), "gifhero-cli-bench-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const inputPath = join(tmpDir, `input${parsed.fileExt}`);
-    const outputPath = join(tmpDir, "output.gif");
+    const framesDir = join(tmpDir, "frames");
+    mkdirSync(framesDir, { recursive: true });
 
     writeFileSync(inputPath, parsed.videoData);
 
-    const gifheroBin = join(import.meta.dirname, "../../packages/gifhero-core/target/release/gifhero");
-
     try {
       const t0 = Date.now();
+      const { frameCount, extractW, extractH } = extractFrames(inputPath, framesDir, fps, width, maxFrames);
 
-      // If maxFrames provided, compute maxDuration = maxFrames / fps to match browser frame count.
-      // Otherwise cap at 20s.
-      const maxDur = parsed.fields.maxFrames
-        ? (parseInt(parsed.fields.maxFrames) / parseInt(fps)).toFixed(2)
-        : "20";
+      // Load PNGs and encode with gifhero Node.js SDK
+      const { createCanvas, Image } = await import("canvas");
+      const { encode } = await import("../../src/index.js");
 
-      execSync(
-        `"${gifheroBin}" "${inputPath}" -w ${width} --fps ${fps} --max-duration ${maxDur} --preset ${preset} -o "${outputPath}" -q`,
-        { stdio: "ignore", timeout: 120000 },
-      );
+      const pngFiles = readdirSync(framesDir).filter(f => f.endsWith(".png")).sort();
+      const frames: Array<{ data: Uint8ClampedArray; delay: number }> = [];
+      let frameW = 0, frameH = 0;
 
-      const gif = readFileSync(outputPath);
+      for (const file of pngFiles) {
+        const img = new Image();
+        img.src = readFileSync(join(framesDir, file));
+        if (!frameW) { frameW = img.width; frameH = img.height; }
+        const canvas = createCanvas(img.width, img.height);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        frames.push({ data: ctx.getImageData(0, 0, img.width, img.height).data, delay: Math.round(1000 / parseInt(fps)) });
+      }
+
+      const gif = await encode({
+        width: frameW,
+        height: frameH,
+        frames,
+        preset,
+        ...(width < frameW ? { targetWidth: width } : {}),
+      });
+
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`[gifhero CLI] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${fps}fps, ${width}px, ${preset})`);
+      console.log(`[gifhero SDK] ${(gif.length / 1024).toFixed(0)} KB in ${elapsed}s (${frameCount} frames, ${fps}fps, ${width}px, ${preset})`);
 
       res.writeHead(200, {
         "Content-Type": "image/gif",
@@ -181,7 +239,7 @@ const server = createServer(async (req, res) => {
       });
       res.end(gif);
     } catch (err) {
-      console.error("[gifhero CLI] Error:", (err as Error).message);
+      console.error("[gifhero SDK] Error:", (err as Error).message);
       res.writeHead(500);
       res.end((err as Error).message);
     } finally {
