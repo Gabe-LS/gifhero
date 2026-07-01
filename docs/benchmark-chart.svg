@@ -18,76 +18,67 @@
   <text x="350" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#111827">gifhero vs the field</text>
   <text x="350" y="46" text-anchor="middle" font-size="10" fill="#9ca3af">480p · 25 fixtures · default settings</text>
 
-  <!-- ==================== LEFT CHART: FILE SIZE ==================== -->
+  <!-- Divider -->
+  <line x1="350" y1="56" x2="350" y2="240" stroke="#e5e7eb" stroke-width="1"/>
 
+  <!--
+    Both charts: labels end at x=73/423, bars start at x=80/430
+    Max bar = 200px. Longest bar (magick) fills full width.
+    Value label 6px after bar end.
+
+    LEFT  — File size: 200px at 243% → 0.823px per %
+    RIGHT — VMAF:      200px at 98.0 (base 94) → 50px per point
+  -->
+
+  <!-- ==================== LEFT: FILE SIZE ==================== -->
   <text x="175" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">FILE SIZE (% of gifhero)</text>
 
-  <!-- Left chart bars: x starts at 80, max bar width 170px (at 243%) -->
-  <!-- Scale: 170/243 = 0.7px per % -->
-
-  <!-- gifhero 100% → 70px -->
   <text x="73" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
-  <rect x="80" y="89" width="70" height="18" rx="3" fill="url(#g1)"/>
-  <text x="156" y="102" font-size="10" fill="#7c3aed" font-weight="600">100%</text>
+  <rect x="80" y="89" width="82" height="18" rx="3" fill="url(#g1)"/>
+  <text x="168" y="102" font-size="10" fill="#7c3aed" font-weight="600">100%</text>
 
-  <!-- gifski 104% → 73px -->
   <text x="73" y="130" text-anchor="end" font-size="11" fill="#6b7280">gifski</text>
-  <rect x="80" y="117" width="73" height="18" rx="3" fill="url(#g2)"/>
-  <text x="159" y="130" font-size="10" fill="#9ca3af">104%</text>
+  <rect x="80" y="117" width="86" height="18" rx="3" fill="url(#g2)"/>
+  <text x="172" y="130" font-size="10" fill="#9ca3af">104%</text>
 
-  <!-- ffmpeg+gsc 167% → 117px -->
   <text x="73" y="158" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg+gsc</text>
-  <rect x="80" y="145" width="117" height="18" rx="3" fill="url(#g2)"/>
-  <text x="203" y="158" font-size="10" fill="#9ca3af">167%</text>
+  <rect x="80" y="145" width="137" height="18" rx="3" fill="url(#g2)"/>
+  <text x="223" y="158" font-size="10" fill="#9ca3af">167%</text>
 
-  <!-- ffmpeg 189% → 132px -->
   <text x="73" y="186" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg</text>
-  <rect x="80" y="173" width="132" height="18" rx="3" fill="url(#g2)"/>
-  <text x="218" y="186" font-size="10" fill="#9ca3af">189%</text>
+  <rect x="80" y="173" width="156" height="18" rx="3" fill="url(#g2)"/>
+  <text x="242" y="186" font-size="10" fill="#9ca3af">189%</text>
 
-  <!-- magick 243% → 170px -->
   <text x="73" y="214" text-anchor="end" font-size="11" fill="#6b7280">magick</text>
-  <rect x="80" y="201" width="170" height="18" rx="3" fill="url(#g2)"/>
-  <text x="256" y="214" font-size="10" fill="#9ca3af">243%</text>
+  <rect x="80" y="201" width="200" height="18" rx="3" fill="url(#g2)"/>
+  <text x="286" y="214" font-size="10" fill="#9ca3af">243%</text>
 
   <text x="80" y="236" font-size="9" fill="#d1d5db">&#x25C4; smaller is better</text>
 
-  <!-- ==================== DIVIDER ==================== -->
-  <line x1="350" y1="62" x2="350" y2="244" stroke="#e5e7eb" stroke-width="1"/>
-
-  <!-- ==================== RIGHT CHART: QUALITY ==================== -->
-
+  <!-- ==================== RIGHT: QUALITY ==================== -->
   <text x="525" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#9ca3af" letter-spacing="0.05em">QUALITY (VMAF 0–100)</text>
 
-  <!-- Right chart bars: x starts at 430, max bar width 170px -->
-  <!-- VMAF range 94–100 → 170/6 = 28.3px per point -->
-
-  <!-- gifhero 96.8 → (96.8-94)*28.3 = 79px -->
   <text x="423" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero</text>
-  <rect x="430" y="89" width="79" height="18" rx="3" fill="url(#g1)"/>
-  <text x="515" y="102" font-size="10" fill="#7c3aed" font-weight="600">96.8</text>
+  <rect x="430" y="89" width="140" height="18" rx="3" fill="url(#g1)"/>
+  <text x="576" y="102" font-size="10" fill="#7c3aed" font-weight="600">96.8</text>
 
-  <!-- gifski 96.1 → 59px -->
   <text x="423" y="130" text-anchor="end" font-size="11" fill="#6b7280">gifski</text>
-  <rect x="430" y="117" width="59" height="18" rx="3" fill="url(#g2)"/>
-  <text x="495" y="130" font-size="10" fill="#9ca3af">96.1</text>
+  <rect x="430" y="117" width="105" height="18" rx="3" fill="url(#g2)"/>
+  <text x="541" y="130" font-size="10" fill="#9ca3af">96.1</text>
 
-  <!-- ffmpeg+gsc 97.1 → 88px -->
   <text x="423" y="158" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg+gsc</text>
-  <rect x="430" y="145" width="88" height="18" rx="3" fill="url(#g2)"/>
-  <text x="524" y="158" font-size="10" fill="#9ca3af">97.1</text>
+  <rect x="430" y="145" width="155" height="18" rx="3" fill="url(#g2)"/>
+  <text x="591" y="158" font-size="10" fill="#9ca3af">97.1</text>
 
-  <!-- ffmpeg 97.6 → 102px -->
   <text x="423" y="186" text-anchor="end" font-size="11" fill="#6b7280">ffmpeg</text>
-  <rect x="430" y="173" width="102" height="18" rx="3" fill="url(#g2)"/>
-  <text x="538" y="186" font-size="10" fill="#9ca3af">97.6</text>
+  <rect x="430" y="173" width="180" height="18" rx="3" fill="url(#g2)"/>
+  <text x="616" y="186" font-size="10" fill="#9ca3af">97.6</text>
 
-  <!-- magick 98.0 → 113px -->
   <text x="423" y="214" text-anchor="end" font-size="11" fill="#6b7280">magick</text>
-  <rect x="430" y="201" width="113" height="18" rx="3" fill="url(#g2)"/>
-  <text x="549" y="214" font-size="10" fill="#9ca3af">98.0</text>
+  <rect x="430" y="201" width="200" height="18" rx="3" fill="url(#g2)"/>
+  <text x="636" y="214" font-size="10" fill="#9ca3af">98.0</text>
 
-  <text x="600" y="236" text-anchor="end" font-size="9" fill="#d1d5db">higher is better &#x25BA;</text>
+  <text x="630" y="236" text-anchor="end" font-size="9" fill="#d1d5db">higher is better &#x25BA;</text>
 
   <!-- ==================== BOTTOM CALLOUT ==================== -->
   <rect x="170" y="256" width="360" height="34" rx="6" fill="#f3f4f6"/>
