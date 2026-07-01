@@ -9,7 +9,7 @@ gifhero produces **smaller files than gifski** on 68% of fixtures with **better 
 Every GIF encoder makes you choose between file size and quality. gifhero doesn't.
 
 <p align="center">
-  <img src="docs/benchmark-chart.svg" alt="gifhero benchmark: smallest files and top-2 quality across 25 fixtures" width="680">
+  <img src="docs/benchmark-chart.png" alt="gifhero benchmark: smallest files and top-2 quality across 25 fixtures" width="680">
 </p>
 
 ## Benchmark results
