@@ -22,15 +22,14 @@
     letter-spacing: 0.02em;
   }
 
-  .drop-zone {
-    margin-top: 12px; width: 100%; max-width: 480px;
-    border: 2px dashed #999; border-radius: 12px;
-    padding: 56px 24px; text-align: center;
-    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  .upload {
+    display: inline-block; margin-top: 24px; padding: 10px 28px;
+    background: #333; color: #fff; border-radius: 8px;
+    text-decoration: none; font-weight: 500; font-size: 0.85rem;
+    cursor: pointer; border: none; transition: background 0.15s;
   }
-  .drop-zone:hover, .drop-zone.over { border-color: #333; background: #f0f0f0; }
-  .drop-zone p { color: #555; font-size: 0.9rem; }
-  .drop-zone input { display: none; }
+  .upload:hover { background: #111; }
+  .upload input { display: none; }
 
   .status {
     margin-top: 20px; font-size: 0.85rem; color: #444;
@@ -88,10 +87,10 @@
 
 <p class="spec">360p &middot; 20 fps &middot; 10s max</p>
 
-<div class="drop-zone" id="dropZone">
-  <p>Drop a video or click to choose</p>
+<label class="upload" id="uploadBtn">
+  Upload video
   <input type="file" id="fileInput" accept="video/*">
-</div>
+</label>
 
 <p class="status" id="status"></p>
 
@@ -118,7 +117,6 @@
 <script type="module">
   import { gifhero } from "./gifhero.js";
 
-  const dropZone = document.getElementById("dropZone");
   const fileInput = document.getElementById("fileInput");
   const status = document.getElementById("status");
   const result = document.getElementById("result");
@@ -126,14 +124,6 @@
   const meta = document.getElementById("meta");
   const downloadLink = document.getElementById("downloadLink");
 
-  dropZone.addEventListener("click", () => fileInput.click());
-  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("over"); });
-  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("over"));
-  dropZone.addEventListener("drop", e => {
-    e.preventDefault();
-    dropZone.classList.remove("over");
-    if (e.dataTransfer.files[0]) encode(e.dataTransfer.files[0]);
-  });
   fileInput.addEventListener("change", () => {
     if (fileInput.files[0]) encode(fileInput.files[0]);
   });
