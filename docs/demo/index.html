@@ -8,32 +8,32 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #fafafa; color: #111;
+    background: #fafafa; color: #222;
     display: flex; flex-direction: column; align-items: center;
     min-height: 100vh; padding: 64px 24px 48px;
   }
 
-  h1 { font-size: 1.4rem; letter-spacing: -0.01em; }
-  .subtitle { color: #666; font-size: 0.85rem; margin-top: 4px; }
-  .subtitle a { color: #7c3aed; text-decoration: none; }
+  h1 { font-size: 1.4rem; letter-spacing: -0.01em; color: #111; }
+  .subtitle { color: #555; font-size: 0.85rem; margin-top: 4px; }
+  .subtitle a { color: #333; text-decoration: underline; }
 
   .spec {
-    margin-top: 24px; font-size: 0.8rem; color: #999;
+    margin-top: 24px; font-size: 0.8rem; color: #666;
     letter-spacing: 0.02em;
   }
 
   .drop-zone {
     margin-top: 12px; width: 100%; max-width: 480px;
-    border: 2px dashed #d1d5db; border-radius: 12px;
+    border: 2px dashed #999; border-radius: 12px;
     padding: 56px 24px; text-align: center;
     cursor: pointer; transition: border-color 0.15s, background 0.15s;
   }
-  .drop-zone:hover, .drop-zone.over { border-color: #7c3aed; background: #faf5ff; }
-  .drop-zone p { color: #888; font-size: 0.9rem; }
+  .drop-zone:hover, .drop-zone.over { border-color: #333; background: #f0f0f0; }
+  .drop-zone p { color: #555; font-size: 0.9rem; }
   .drop-zone input { display: none; }
 
   .status {
-    margin-top: 20px; font-size: 0.85rem; color: #666;
+    margin-top: 20px; font-size: 0.85rem; color: #444;
     min-height: 1.4em; text-align: center;
   }
 
@@ -44,21 +44,21 @@
   .result.visible { display: flex; }
   .result img {
     max-width: 100%; border-radius: 8px;
-    box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+    box-shadow: 0 1px 8px rgba(0,0,0,0.08);
   }
-  .meta { font-size: 0.8rem; color: #888; }
+  .meta { font-size: 0.8rem; color: #555; }
 
   .download {
     display: inline-block; padding: 10px 28px;
-    background: #7c3aed; color: #fff; border-radius: 8px;
+    background: #333; color: #fff; border-radius: 8px;
     text-decoration: none; font-weight: 500; font-size: 0.85rem;
     transition: background 0.15s;
   }
-  .download:hover { background: #6d28d9; }
+  .download:hover { background: #111; }
 
   footer {
     margin-top: auto; padding-top: 48px;
-    font-size: 0.75rem; color: #bbb; text-align: center;
+    font-size: 0.75rem; color: #888; text-align: center;
     line-height: 1.6;
   }
 </style>
