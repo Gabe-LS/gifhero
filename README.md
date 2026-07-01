@@ -8,18 +8,9 @@ gifhero produces **smaller files than gifski** on 68% of fixtures with **better 
 
 Every GIF encoder makes you choose between file size and quality. gifhero doesn't.
 
-```
-Size (KB)                     Quality (VMAF)
-    ◄── smaller    larger ──►     ◄── worse    better ──►
-
-    gifhero      █████░░░░░░░     gifhero      ██████████░░  96.8
-    gifski       ██████░░░░░░     gifski       █████████░░░  96.1
-    ffmpeg+gsc   █████████░░░     ffmpeg+gsc   █████████░█░  97.1
-    ffmpeg       ██████████░░     ffmpeg       ██████████░░  97.6
-    magick       █████████████    magick       ██████████░░  98.0
-```
-
-gifhero is smaller than gifski on most content AND higher quality.
+<p align="center">
+  <img src="docs/benchmark-chart.svg" alt="gifhero benchmark: smallest files and top-2 quality across 25 fixtures" width="680">
+</p>
 
 ## Benchmark results
 
