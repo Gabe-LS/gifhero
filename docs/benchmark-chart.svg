@@ -39,21 +39,28 @@
   <!-- ==================== LEFT: FILE SIZE ==================== -->
   <text x="190" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">FILE SIZE (% of gifhero-wasm)</text>
 
+  <!--
+    All-resolution averages (n=100 each):
+    Size: gifhero-wasm=100%, gifski-wasm=149%, gifski=133%, ffmpeg=192%
+    VMAF: gifhero-wasm=96.7, gifski-wasm=96.0, gifski=95.5, ffmpeg=97.3
+    Left:  max bar 192% at 191px. Scale=191/192=0.995px/%.
+    Right: range 93-100, max bar (ffmpeg 97.3) at 187px. Scale=187/4.3=43.5px/pt.
+  -->
   <text x="108" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero-wasm</text>
-  <rect x="115" y="89" width="147" height="18" rx="3" fill="url(#g1)"/>
-  <text x="268" y="102" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
+  <rect x="115" y="89" width="100" height="18" rx="3" fill="url(#g1)"/>
+  <text x="221" y="102" font-size="10" fill="#6d28d9" font-weight="600">100%</text>
 
   <text x="108" y="130" text-anchor="end" font-size="11" fill="#4b5563">gifski-wasm</text>
-  <rect x="115" y="117" width="178" height="18" rx="3" fill="url(#g2)"/>
-  <text x="299" y="130" font-size="10" fill="#525252">121%</text>
+  <rect x="115" y="117" width="148" height="18" rx="3" fill="url(#g2)"/>
+  <text x="269" y="130" font-size="10" fill="#525252">149%</text>
 
   <text x="108" y="158" text-anchor="end" font-size="11" fill="#4b5563">gifski CLI</text>
-  <rect x="115" y="145" width="162" height="18" rx="3" fill="url(#g2)"/>
-  <text x="283" y="158" font-size="10" fill="#525252">110%</text>
+  <rect x="115" y="145" width="132" height="18" rx="3" fill="url(#g2)"/>
+  <text x="253" y="158" font-size="10" fill="#525252">133%</text>
 
   <text x="108" y="186" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg</text>
   <rect x="115" y="173" width="191" height="18" rx="3" fill="url(#g2)"/>
-  <text x="312" y="186" font-size="10" fill="#525252">130%</text>
+  <text x="312" y="186" font-size="10" fill="#525252">192%</text>
 
   <text x="115" y="215" font-size="10" fill="#5b21b6" font-weight="600">25/25 fixtures smaller at every resolution</text>
 
@@ -62,21 +69,22 @@
   <!-- ==================== RIGHT: QUALITY ==================== -->
   <text x="548" y="72" text-anchor="middle" font-size="10" font-weight="600" fill="#525252" letter-spacing="0.05em">QUALITY (VMAF 0-100)</text>
 
+  <!-- VMAF: 43.5px per point above 93. Bars start x=442, rightmost value at x=660. -->
   <text x="435" y="102" text-anchor="end" font-size="11" font-weight="600" fill="#111827">gifhero-wasm</text>
-  <rect x="442" y="89" width="187" height="18" rx="3" fill="url(#g1)"/>
-  <text x="635" y="102" font-size="10" fill="#6d28d9" font-weight="600">97.2</text>
+  <rect x="442" y="89" width="161" height="18" rx="3" fill="url(#g1)"/>
+  <text x="609" y="102" font-size="10" fill="#6d28d9" font-weight="600">96.7</text>
 
   <text x="435" y="130" text-anchor="end" font-size="11" fill="#4b5563">gifski-wasm</text>
-  <rect x="442" y="117" width="142" height="18" rx="3" fill="url(#g2)"/>
-  <text x="590" y="130" font-size="10" fill="#525252">96.2</text>
+  <rect x="442" y="117" width="131" height="18" rx="3" fill="url(#g2)"/>
+  <text x="579" y="130" font-size="10" fill="#525252">96.0</text>
 
   <text x="435" y="158" text-anchor="end" font-size="11" fill="#4b5563">gifski CLI</text>
-  <rect x="442" y="145" width="151" height="18" rx="3" fill="url(#g2)"/>
-  <text x="599" y="158" font-size="10" fill="#525252">96.4</text>
+  <rect x="442" y="145" width="109" height="18" rx="3" fill="url(#g2)"/>
+  <text x="557" y="158" font-size="10" fill="#525252">95.5</text>
 
   <text x="435" y="186" text-anchor="end" font-size="11" fill="#4b5563">ffmpeg</text>
-  <rect x="442" y="173" width="169" height="18" rx="3" fill="url(#g2)"/>
-  <text x="617" y="186" font-size="10" fill="#525252">96.8</text>
+  <rect x="442" y="173" width="187" height="18" rx="3" fill="url(#g2)"/>
+  <text x="635" y="186" font-size="10" fill="#525252">97.3</text>
 
   <text x="442" y="215" font-size="10" fill="#525252">comparable or better quality</text>
 
